@@ -17,6 +17,8 @@ export const ZONES = [
     sea: { color: '#10405f', depth: '#0a2739', roughness: 0.24, metalness: 0.04, waveScale: 70 },
     fog: { color: '#cfe3f2', near: 900, far: 6500 },
     ambient: { color: '#9dc4e2', intensity: 0.62 },
+    clouds: { color: '#ffffff', opacity: 0.92, cirrus: '#ffffff', cirrusOpacity: 0.5, coverage: 1 },
+    terrain: { color: '#8fa87a', density: 0.5, seedOffset: 0 },
     exposure: 0.95,
   },
   {
@@ -28,6 +30,8 @@ export const ZONES = [
     sea: { color: '#2c4a4f', depth: '#16282c', roughness: 0.3, metalness: 0.02, waveScale: 90 },
     fog: { color: '#dfe9f2', near: 800, far: 5800 },
     ambient: { color: '#a9c3d8', intensity: 0.55 },
+    clouds: { color: '#f4f8fd', opacity: 0.95, cirrus: '#ffffff', cirrusOpacity: 0.55, coverage: 0.9 },
+    terrain: { color: '#9aa3ad', density: 0.62, seedOffset: 17 },
     exposure: 0.96,
   },
   {
@@ -39,6 +43,8 @@ export const ZONES = [
     sea: { color: '#c69a5e', depth: '#8d6b3c', roughness: 0.85, metalness: 0.0, waveScale: 40 },
     fog: { color: '#f2e2c4', near: 1100, far: 6400 },
     ambient: { color: '#e0c49a', intensity: 0.7 },
+    clouds: { color: '#fdf6e6', opacity: 0.85, cirrus: '#fff2d8', cirrusOpacity: 0.32, coverage: 0.6 },
+    terrain: { color: '#c8a76a', density: 0.4, seedOffset: 33 },
     exposure: 0.98,
   },
   {
@@ -50,6 +56,8 @@ export const ZONES = [
     sea: { color: '#1b2c36', depth: '#0d161c', roughness: 0.22, metalness: 0.06, waveScale: 120 },
     fog: { color: '#5c6a76', near: 400, far: 4200 },
     ambient: { color: '#6f8290', intensity: 0.75 },
+    clouds: { color: '#78838f', opacity: 0.98, cirrus: '#8d99a6', cirrusOpacity: 0.75, coverage: 1 },
+    terrain: { color: '#5c6670', density: 0.55, seedOffset: 51 },
     exposure: 0.95,
   },
   {
@@ -61,6 +69,8 @@ export const ZONES = [
     sea: { color: '#2a2f47', depth: '#14182a', roughness: 0.2, metalness: 0.08, waveScale: 80 },
     fog: { color: '#e79b6a', near: 700, far: 5600 },
     ambient: { color: '#b9846a', intensity: 0.5 },
+    clouds: { color: '#ffd9b0', opacity: 0.9, cirrus: '#ffc9a0', cirrusOpacity: 0.6, coverage: 0.85 },
+    terrain: { color: '#8a7a6a', density: 0.45, seedOffset: 67 },
     exposure: 0.96,
   },
 ];

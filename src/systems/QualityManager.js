@@ -9,42 +9,63 @@
 
 export const TIERS = Object.freeze(['low', 'medium', 'high']);
 
-/** What each tier turns on. Consumed by the scene, sky, world and effects modules. */
+/**
+ * What each tier turns on. Consumed by the scene, sky, world, terrain and effects
+ * modules.
+ *
+ * The two texture sizes are the "smaller texture variant" answer for generated art:
+ * every map in the game is painted into a canvas at start-up, so the tier decides how
+ * big that canvas is rather than which file to download. A low-tier device paints a
+ * 512² airframe set and 128² cloud cards, which is a quarter of the texels of the high
+ * tier and a fraction of the start-up cost.
+ */
 export const PRESETS = Object.freeze({
   low: {
     shadows: false,
     shadowMapSize: 512,
-    clouds: 0,
-    waveDetail: 'flat',
     antialias: false,
     maxPixelRatio: 1,
     seaSegments: 16,
     seaRepeat: 6,
     anisotropy: 1,
+    /** Distance-faded fine ripple on the water: one extra texture sample per pixel. */
+    waterDetail: false,
+    /** Cumulus cards. The whole field is a single instanced draw call. */
+    clouds: 10,
+    /** Island meshes the terrain pool can show at once. */
+    islands: 6,
+    paintTextureSize: 512,
+    cloudTextureSize: 128,
     renderScaleRange: [0.6, 1],
   },
   medium: {
     shadows: true,
     shadowMapSize: 1024,
-    clouds: 12,
-    waveDetail: 'normal',
     antialias: true,
     maxPixelRatio: 1.5,
     seaSegments: 32,
     seaRepeat: 9,
     anisotropy: 4,
+    waterDetail: true,
+    clouds: 20,
+    islands: 10,
+    paintTextureSize: 1024,
+    cloudTextureSize: 256,
     renderScaleRange: [0.7, 1],
   },
   high: {
     shadows: true,
     shadowMapSize: 2048,
-    clouds: 26,
-    waveDetail: 'normal',
     antialias: true,
     maxPixelRatio: 2,
     seaSegments: 48,
     seaRepeat: 12,
     anisotropy: 8,
+    waterDetail: true,
+    clouds: 30,
+    islands: 14,
+    paintTextureSize: 1024,
+    cloudTextureSize: 256,
     renderScaleRange: [0.85, 1],
   },
 });

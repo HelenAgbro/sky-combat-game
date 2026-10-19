@@ -24,8 +24,10 @@ import { PlayerAircraft } from '../aircraft/PlayerAircraft.js';
 import { DEFAULT_AIRCRAFT_ID } from '../data/aircraft.js';
 import { DEFAULT_ZONE_ID, getZone } from '../data/zones.js';
 import { CameraController } from '../scene/CameraController.js';
+import { Clouds } from '../scene/Clouds.js';
 import { Lighting } from '../scene/Lighting.js';
 import { Sky } from '../scene/Sky.js';
+import { Terrain } from '../scene/Terrain.js';
 import { World } from '../scene/World.js';
 import { PRESETS, QualityManager, pickTier, readDeviceMetrics } from '../systems/QualityManager.js';
 import { DEMO_FLIGHT, RENDER } from './config.js';
@@ -110,7 +112,19 @@ export class Game {
     this.world = new World(zone, this.quality.preset);
     this.scene.add(this.world.group);
 
-    this.factory = new AircraftFactory({ anisotropy: this.quality.preset.anisotropy });
+    // The atmosphere and the land. Both recycle a fixed pool of objects around the
+    // aircraft rather than growing, so flying for an hour costs the same as flying for
+    // a minute.
+    this.clouds = new Clouds(zone, this.quality.preset);
+    this.scene.add(this.clouds.group);
+
+    this.terrain = new Terrain(zone, this.quality.preset);
+    this.scene.add(this.terrain.group);
+
+    this.factory = new AircraftFactory({
+      anisotropy: this.quality.preset.anisotropy,
+      paintTextureSize: this.quality.preset.paintTextureSize,
+    });
     const { aircraft, group, source, effects } = await this.factory.create(DEFAULT_AIRCRAFT_ID);
     this.aircraft = new PlayerAircraft({ aircraft, model: group, source, effects });
     this.scene.add(this.aircraft.object3D);
@@ -143,6 +157,12 @@ export class Game {
       frameMs: this.frameMs,
       frameCount: this.frameCount,
       modelSource: this.aircraft?.source ?? 'none',
+      /** Scene budget: what the atmosphere and the land are actually costing. */
+      clouds: this.clouds?.count ?? 0,
+      islands: this.terrain?.placed ?? 0,
+      islandCapacity: this.terrain?.capacity ?? 0,
+      /** Whether the airframe has moving control surfaces to deflect. */
+      controlSurfaces: Boolean(this.aircraft?.surfaces),
       ...(this.aircraft?.telemetry() ?? {}),
     };
   }
@@ -259,6 +279,8 @@ export class Game {
     this.sky.update(this.camera);
     this.lighting.update(this.sky.sunDirection, focus);
     this.world.update(dt, focus);
+    this.clouds.update(dt, this.camera, focus, this.aircraft.forward);
+    this.terrain.update(focus);
     if (this.cameraOverride) this.cameraOverride(this.camera, this.aircraft);
     else this.cameraRig.update(dt, this.aircraft);
   }
@@ -339,6 +361,8 @@ export class Game {
     this.sky?.dispose();
     this.lighting?.dispose();
     this.world?.dispose();
+    this.clouds?.dispose();
+    this.terrain?.dispose();
     this.factory?.dispose();
     this.renderer?.dispose();
     this.listeners.clear();

@@ -38,18 +38,32 @@ const FRAGMENT_SHADER = /* glsl */ `
     vec3 direction = normalize(vDirection);
     float height = direction.y;
 
-    float rise = pow(clamp(height, 0.0, 1.0), 0.5);
-    vec3 sky = mix(uHorizon, uZenith, rise);
+    // The gradient is compressed toward the horizon (the 0.42 exponent), because
+    // that is where the eye reads the colour change, and stretched toward the
+    // zenith, where a real sky is nearly uniform.
+    vec3 sky = mix(uHorizon, uZenith, pow(clamp(height, 0.0, 1.0), 0.42));
 
-    // Haze thickens toward the horizon, and below it fades into the same colour.
-    float haze = pow(1.0 - clamp(abs(height), 0.0, 1.0), 5.0);
-    sky = mix(sky, uHaze, haze * 0.65);
-    sky = mix(sky, uHaze * 0.72, smoothstep(0.0, -0.22, height));
+    // Haze: a tight band hugging the horizon over a soft wash across the whole sky.
+    float band = exp(-abs(height) * 7.0);
+    sky = mix(sky, uHaze, band * 0.55 + pow(1.0 - clamp(abs(height), 0.0, 1.0), 4.0) * 0.22);
 
-    // Sun disc, tight bloom and a broad scatter glow.
+    // Below the horizon, fade into the same colour the sea fogs into, so the horizon
+    // is a colour match rather than a visible edge.
+    sky = mix(sky, uHaze * 0.86, smoothstep(0.0, -0.16, height));
+
     float sun = max(dot(direction, normalize(uSunDirection)), 0.0);
-    float disc = smoothstep(0.9994, 0.99985, sun);
-    vec3 color = sky + uSunColor * (disc * 6.0 + pow(sun, 260.0) * 0.8 + pow(sun, 9.0) * 0.14);
+
+    // Broad forward scatter: the sky brightens all the way around the sun, which is
+    // what makes the light feel like it belongs to the scene rather than being
+    // pasted over it.
+    sky += uHorizon * pow(sun, 2.2) * 0.10;
+    sky += uHaze * pow(sun, 5.0) * 0.10;
+
+    // The disc itself, a tight bloom around it, and a wide halo.
+    float disc = smoothstep(0.99955, 0.99985, sun);
+    float glow = pow(sun, 400.0) * 0.7 + pow(sun, 24.0) * 0.22;
+
+    vec3 color = sky + uSunColor * (disc * 8.0 + glow);
 
     gl_FragColor = vec4(color, 1.0);
     #include <tonemapping_fragment>
