@@ -4,10 +4,10 @@ A 3D aerial combat arcade game for [start.ng](https://start.ng) — third-person
 jet flight over sweeping scenery, with coins, power-ups, fuel, enemies and a public
 leaderboard ranked on distance.
 
-**Stage 2 status: foundations.** The world, the aircraft, the lighting, the camera and
-the interface are in place and the project builds, tests and publishes. Player flight
-controls, enemies, weapons, the hangar, the shop and the start.ng integration are
-Stages 3–9 — see [Stages](#stages).
+**Stage 3 status: flight controls.** You can fly it. The aircraft responds to the
+keyboard and to on-screen touch controls, banks and turns, is held inside a flight
+area, and the camera follows it. Enemies, weapons, coins, fuel, the hangar, the shop
+and the start.ng integration are Stages 4–9 — see [Stages](#stages).
 
 > **The aircraft is temporary artwork.** No licensed model is available yet, and
 > start.ng cannot serve `.glb`/`.gltf` files anyway, so the airframes are generated in
@@ -17,7 +17,35 @@ Stages 3–9 — see [Stages](#stages).
 
 ---
 
-## Requirements
+## Controls
+
+| Action | Keyboard | Touch |
+| --- | --- | --- |
+| Climb / dive | `W` / `S` or `↑` / `↓` | Drag the stick up / down |
+| Roll and turn | `A` / `D` or `←` / `→` | Drag the stick left / right |
+| Rudder (fine aiming) | `Q` / `E` | — |
+| Boost | `Shift` | Boost button |
+| Fire | `Space` | Fire button *(reserved for the combat stage)* |
+| Pause / resume | `P` or `Escape` | Pause button |
+
+The throttle is automatic: the aircraft holds a cruise setting and `Shift` is the
+afterburner. Banking is what turns the aircraft — there is no separate turn key — and
+the aircraft levels itself when you let go of the stick.
+
+The on-screen controls appear automatically on a coarse-pointer device, or when the
+page is opened with `?touch`. On a laptop with a touchscreen they appear the first time
+a finger is used.
+
+## Flight area
+
+The aircraft is held inside a play area rather than fenced in by an invisible wall:
+
+- a **floor** at 60 m and a **ceiling** at 1800 m, which ease the nose back up or down
+  inside the last 130 m;
+- a **soft edge** at 3400 m from the centre, which turns the aircraft back toward the
+  middle, and a hard limit at 4200 m as the last resort.
+
+The HUD tells you when a limit is being pushed against. Nothing teleports.
 
 - **Node.js 20.19+ or 22.12+** (developed on 22.23) and npm
 - A browser with WebGL2 (Chrome, Edge, Firefox, Safari)
@@ -115,9 +143,9 @@ for how the aircraft are modelled and why no `.glb` file is shipped.
 | Stage | Scope | State |
 | --- | --- | --- |
 | 1 | Repository and environment inspection, architecture, asset strategy | done |
-| 2 | Vite + Three.js, scene, lighting, procedural Falcon, chase camera, menu | **this build** |
-| 3 | Flight controls, banking, touch controls | next |
-| 4 | Visual upgrade: scenery, materials, effects | |
+| 2 | Vite + Three.js, scene, lighting, procedural Falcon, chase camera, menu | done |
+| 3 | Flight controls, banking, touch controls, flight area, engine glow | **this build** |
+| 4 | Visual upgrade: scenery, materials, effects | next |
 | 5 | Obstacles, enemies, projectiles, collisions, combat | |
 | 6 | Coins, fuel, power-ups, distance, difficulty | |
 | 7 | Hangar, unlocks, weapon shop, local progression | |

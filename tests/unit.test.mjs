@@ -9,8 +9,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { AircraftController, scaleFromAttributes } from '../src/aircraft/AircraftController.js';
-import { CAMERA, DEMO_FLIGHT, FLIGHT, RENDER, WORLD } from '../src/game/config.js';
+import { BOUNDS, CAMERA, DEMO_FLIGHT, FLIGHT, RENDER, WORLD } from '../src/game/config.js';
 import { GameState, STATES } from '../src/game/GameState.js';
+import { radialDistance } from '../src/game/math.js';
 import { PRESETS, TIERS, pickTier } from '../src/systems/QualityManager.js';
 
 const STEP = RENDER.fixedStep;
@@ -36,7 +37,9 @@ test('config keeps its invariants', () => {
   assert.ok(DEMO_FLIGHT.throttle > 0 && DEMO_FLIGHT.throttle <= 1);
   assert.ok(CAMERA.offset.z > 0, 'the camera sits behind the aircraft');
   assert.ok(CAMERA.offset.y > 0, 'the camera sits above the aircraft');
-  assert.ok(WORLD.wrapRadius > 0);
+  assert.ok(BOUNDS.minAltitude > 0 && BOUNDS.maxAltitude > BOUNDS.minAltitude);
+  assert.ok(BOUNDS.softRadius < BOUNDS.hardRadius, 'the soft boundary sits inside the hard one');
+  assert.ok(WORLD.seaSize > BOUNDS.hardRadius * 2, 'the world is larger than the play area');
 });
 
 test('GameState allows the documented transitions', () => {
@@ -204,10 +207,13 @@ test('the flight model stays finite and inside the world', () => {
   }
 
   for (const [key, value] of Object.entries(controller.telemetry())) {
+    // `boundary` is a label rather than a number.
+    if (typeof value !== 'number') continue;
     assert.ok(Number.isFinite(value), `${key} is finite (${value})`);
   }
-  assert.ok(Math.abs(controller.position.x) <= WORLD.wrapRadius + 1e-6);
-  assert.ok(Math.abs(controller.position.z) <= WORLD.wrapRadius + 1e-6);
+  assert.ok(radialDistance(controller.position.x, controller.position.z) <= BOUNDS.hardRadius + 1e-6);
+  assert.ok(controller.altitude >= BOUNDS.minAltitude - 1e-6);
+  assert.ok(controller.altitude <= BOUNDS.maxAltitude + 1e-6);
   assert.ok(controller.fuel >= 0 && controller.fuel <= 1);
 });
 

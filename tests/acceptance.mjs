@@ -101,6 +101,14 @@ async function main() {
       await page.waitForFunction(() => window.__sky?.ready, null, { timeout: 60000 });
       await page.click('[data-action="start"]');
 
+      /*
+       * Fly it hard, by hand, while measuring. A continuous climb and hard turn
+       * exercises the camera far more than the scripted menu backdrop, and it is
+       * what a player will actually do.
+       */
+      const held = viewport.width < viewport.height ? ['KeyS', 'KeyA'] : ['KeyW', 'KeyD'];
+      for (const key of held) await page.keyboard.down(key);
+
       // Sample across a full weave, so every bank angle is covered.
       let worst = null;
       for (let i = 0; i < 34; i += 1) {
@@ -109,6 +117,8 @@ async function main() {
         const extent = Math.max(-sample.ndc.minX, sample.ndc.maxX, -sample.ndc.minY, sample.ndc.maxY);
         if (!worst || extent > worst.extent) worst = { ...sample, extent };
       }
+
+      for (const key of held) await page.keyboard.up(key);
 
       const { ndc, canvas } = worst;
       const width = (ndc.maxX - ndc.minX) / 2;
@@ -121,7 +131,7 @@ async function main() {
           ` x[${ndc.minX.toFixed(2)}, ${ndc.maxX.toFixed(2)}]` +
           ` y[${ndc.minY.toFixed(2)}, ${ndc.maxY.toFixed(2)}]` +
           `  ${(width * 100).toFixed(0)}%x${(height * 100).toFixed(0)}% of half-frame` +
-          `  bank ${(worst.bank * 57.3).toFixed(0)}deg`,
+          `  holding ${held.join('+') || 'nothing'}`,
       );
       await page.close();
     }
@@ -189,7 +199,261 @@ async function main() {
     if (!failure.loadingHidden) problems.push('the loading screen stayed over the failure panel');
     await noGl.close();
 
-    // ----------------------------------------------------------------- judder
+    // --------------------------------------------------------------- keyboard
+    console.log('\n4. Do the keyboard controls fly the aircraft, and does the page stay put?');
+    const kb = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+    await kb.route('https://start.ng/**', (route) => route.abort());
+    await kb.goto(`${base}/`, { waitUntil: 'load' });
+    await kb.waitForFunction(() => window.__sky?.ready, null, { timeout: 60000 });
+    await kb.click('[data-action="start"]');
+    await kb.waitForTimeout(900);
+
+    // Registered after the game's own listener, so it sees whether the browser's
+    // default was suppressed.
+    await kb.evaluate(() => {
+      window.__probe = { prevented: {}, scrollBefore: window.scrollY };
+      for (const code of ['ArrowDown', 'ArrowLeft', 'Space']) {
+        window.addEventListener('keydown', (event) => {
+          if (event.code === code) window.__probe.prevented[code] = event.defaultPrevented;
+        });
+      }
+    });
+
+    const pitch = () => kb.evaluate(() => window.__sky.telemetry().pitch);
+    const bank = () => kb.evaluate(() => window.__sky.telemetry().bank);
+    const hold = async (key, ms) => {
+      await kb.keyboard.down(key);
+      await kb.waitForTimeout(ms);
+      const value = { pitch: await pitch(), bank: await bank() };
+      await kb.keyboard.up(key);
+      await kb.waitForTimeout(350);
+      return value;
+    };
+
+    const level = { pitch: await pitch(), bank: await bank() };
+    const climbing = await hold('KeyW', 1100);
+    const diving = await hold('ArrowDown', 1100);
+    const rightRoll = await hold('KeyD', 600);
+    const leftRoll = await hold('ArrowLeft', 600);
+    // Space is wired for the combat stage; pressing it here proves the browser's own
+    // page-down is suppressed.
+    await hold('Space', 250);
+    const probe = await kb.evaluate(() => ({ ...window.__probe, scrollAfter: window.scrollY }));
+
+    console.log(
+      `   W: pitch ${level.pitch.toFixed(2)} -> ${climbing.pitch.toFixed(2)}` +
+        `   down arrow: -> ${diving.pitch.toFixed(2)}`,
+    );
+    console.log(
+      `   D: bank -> ${rightRoll.bank.toFixed(2)}` +
+        `   left arrow: bank -> ${leftRoll.bank.toFixed(2)}` +
+        ` (a leftward change of ${(leftRoll.bank - rightRoll.bank).toFixed(2)})`,
+    );
+    console.log(
+      `   browser default suppressed — down arrow: ${probe.prevented.ArrowDown},` +
+        ` left arrow: ${probe.prevented.ArrowLeft}, space: ${probe.prevented.Space}` +
+        `   page scroll: ${probe.scrollBefore} -> ${probe.scrollAfter}`,
+    );
+
+    if (climbing.pitch < level.pitch + 0.1) problems.push('W did not raise the nose');
+    if (diving.pitch > climbing.pitch - 0.1) problems.push('the down arrow did not lower the nose');
+    if (rightRoll.bank > -0.3) problems.push('D did not bank the aircraft to the right');
+    // Measured as a change, because the aircraft may already be banked hard the other way.
+    if (leftRoll.bank - rightRoll.bank < 0.3) problems.push('the left arrow did not roll the aircraft left');
+    for (const code of ['ArrowDown', 'ArrowLeft', 'Space']) {
+      if (probe.prevented[code] !== true) problems.push(`the browser default was not suppressed for ${code}`);
+    }
+    if (probe.scrollAfter !== probe.scrollBefore) problems.push('the page scrolled while flying');
+
+    // ------------------------------------------------------------------ touch
+    console.log('\n5. Do the on-screen controls work on a phone-sized viewport?');
+    const mobile = await browser.newPage({
+      viewport: { width: 390, height: 844 },
+      hasTouch: true,
+      isMobile: true,
+    });
+    await mobile.route('https://start.ng/**', (route) => route.abort());
+    await mobile.goto(`${base}/?touch`, { waitUntil: 'load' });
+    await mobile.waitForFunction(() => window.__sky?.ready, null, { timeout: 60000 });
+    await mobile.click('[data-action="start"]');
+    await mobile.waitForTimeout(700);
+
+    const layout = await mobile.evaluate(() => {
+      const size = (selector) => {
+        const element = document.querySelector(selector);
+        if (!element) return null;
+        const rect = element.getBoundingClientRect();
+        return { w: Math.round(rect.width), h: Math.round(rect.height) };
+      };
+      const zone = document.querySelector('.touch-zone');
+      return {
+        visible: document.querySelector('.touch')?.classList.contains('is-visible') ?? false,
+        touchAction: zone ? getComputedStyle(zone).touchAction : null,
+        fire: size('.touch-fire'),
+        boost: size('.touch-boost'),
+        pause: size('.touch-pause'),
+      };
+    });
+
+    console.log(
+      `   controls visible: ${layout.visible}   touch-action: ${layout.touchAction}` +
+        `   fire ${layout.fire?.w}x${layout.fire?.h}  boost ${layout.boost?.w}x${layout.boost?.h}` +
+        `  pause ${layout.pause?.w}x${layout.pause?.h}`,
+    );
+
+    if (!layout.visible) problems.push('the touch controls did not appear on a coarse-pointer device');
+    if (layout.touchAction !== 'none') problems.push('the stick zone would let the page scroll');
+    for (const [name, size] of Object.entries({ fire: layout.fire, boost: layout.boost, pause: layout.pause })) {
+      if (!size || size.w < 44 || size.h < 44) problems.push(`the ${name} button is smaller than a 44 px target`);
+    }
+
+    // Drag the stick right and up: the aircraft should roll right and climb.
+    const stick = await mobile.evaluate(() => {
+      const zone = document.querySelector('.touch-zone');
+      const rect = zone.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      const send = (type, x, y) => {
+        const event = new PointerEvent(type, {
+          pointerId: 7,
+          pointerType: 'touch',
+          isPrimary: true,
+          bubbles: true,
+          cancelable: true,
+          clientX: x,
+          clientY: y,
+        });
+        zone.dispatchEvent(event);
+        return event.defaultPrevented;
+      };
+      const prevented = send('pointerdown', cx, cy);
+      send('pointermove', cx + 70, cy - 70);
+      return { prevented, controls: window.__sky.controls };
+    });
+
+    await mobile.waitForTimeout(900);
+    const touchFlight = await mobile.evaluate(() => ({
+      telemetry: window.__sky.telemetry(),
+      controls: window.__sky.controls,
+    }));
+
+    await mobile.evaluate(() => {
+      const zone = document.querySelector('.touch-zone');
+      zone.dispatchEvent(
+        new PointerEvent('pointerup', {
+          pointerId: 7,
+          pointerType: 'touch',
+          isPrimary: true,
+          bubbles: true,
+          cancelable: true,
+          clientX: 0,
+          clientY: 0,
+        }),
+      );
+    });
+    await mobile.waitForTimeout(200);
+    const released = await mobile.evaluate(() => window.__sky.controls);
+
+    console.log(
+      `   stick drag: page scrolled ${stick.prevented ? 'no' : 'YES'}` +
+        `   controls roll ${stick.controls.roll.toFixed(2)} pitch ${stick.controls.pitch.toFixed(2)}`,
+    );
+    console.log(
+      `   aircraft: bank ${touchFlight.telemetry.bank.toFixed(2)}` +
+        ` pitch ${touchFlight.telemetry.pitch.toFixed(2)}` +
+        `   released -> roll ${released.roll.toFixed(2)} pitch ${released.pitch.toFixed(2)}`,
+    );
+
+    if (stick.prevented !== true) problems.push('the stick drag reached the page instead of being captured');
+    if (stick.controls.roll < 0.5 || stick.controls.pitch < 0.5) {
+      problems.push(`the stick did not report full deflection (${JSON.stringify(stick.controls)})`);
+    }
+    if (touchFlight.telemetry.bank > -0.2) problems.push('the touch stick did not bank the aircraft');
+    if (touchFlight.telemetry.pitch < 0.1) problems.push('the touch stick did not raise the nose');
+    if (released.roll !== 0 || released.pitch !== 0) problems.push('releasing the stick did not centre it');
+
+    // The fire button is wired for the combat stage: it must report a press.
+    const firePress = await mobile.evaluate(() => {
+      const button = document.querySelector('.touch-fire');
+      const rect = button.getBoundingClientRect();
+      const send = (type) => {
+        const event = new PointerEvent(type, {
+          pointerId: 9,
+          pointerType: 'touch',
+          isPrimary: true,
+          bubbles: true,
+          cancelable: true,
+          clientX: rect.left + rect.width / 2,
+          clientY: rect.top + rect.height / 2,
+        });
+        button.dispatchEvent(event);
+        return event.defaultPrevented;
+      };
+      const prevented = send('pointerdown');
+      const pressed = window.__sky.controls.fire;
+      send('pointerup');
+      return { prevented, pressed, released: window.__sky.controls.fire };
+    });
+
+    console.log(
+      `   fire button: page scrolled ${firePress.prevented ? 'no' : 'YES'}` +
+        `  pressed ${firePress.pressed}  released ${firePress.released}`,
+    );
+    if (firePress.prevented !== true) problems.push('the fire button let the page scroll');
+    if (firePress.pressed !== true) problems.push('the fire button did not report a press');
+    if (firePress.released !== false) problems.push('the fire button stayed pressed after release');
+
+    // A real touch, through the browser's own touch pipeline, must reach the controls.
+    const fireBox = await mobile.locator('.touch-fire').boundingBox();
+    await mobile.touchscreen.tap(fireBox.x + fireBox.width / 2, fireBox.y + fireBox.height / 2);
+    await mobile.waitForTimeout(150);
+    const afterTap = await mobile.evaluate(() => window.__sky.controls.fire);
+    if (afterTap !== false) problems.push('a real tap left the fire button stuck down');
+
+    await mobile.close();
+
+    // ------------------------------------------------------------------ pause
+    console.log('\n6. Does pause and resume work without duplicating anything?');
+    const stateOf = () => kb.evaluate(() => window.__sky.game.state.current);
+    const framesPerSecond = async (ms) => {
+      const before = await kb.evaluate(() => window.__sky.game.frameCount);
+      await kb.waitForTimeout(ms);
+      const after = await kb.evaluate(() => window.__sky.game.frameCount);
+      return ((after - before) / ms) * 1000;
+    };
+
+    const flyingRate = await framesPerSecond(1000);
+    await kb.keyboard.press('KeyP');
+    await kb.waitForTimeout(300);
+    const pausedState = await stateOf();
+    const frozenBefore = await kb.evaluate(() => window.__sky.telemetry().distance);
+    await kb.waitForTimeout(700);
+    const frozenAfter = await kb.evaluate(() => window.__sky.telemetry().distance);
+
+    await kb.keyboard.press('KeyP');
+    await kb.waitForTimeout(300);
+    const resumedState = await stateOf();
+    const resumedRate = await framesPerSecond(1000);
+
+    console.log(
+      `   one press: flying -> ${pausedState}, another: -> ${resumedState}` +
+        `   distance while paused: ${frozenBefore.toFixed(1)} -> ${frozenAfter.toFixed(1)}`,
+    );
+    console.log(
+      `   frames per second: ${flyingRate.toFixed(0)} before, ${resumedRate.toFixed(0)} after resuming`,
+    );
+
+    if (pausedState !== 'paused') problems.push('one press of P did not pause (or toggled twice)');
+    if (resumedState !== 'flying') problems.push('the second press of P did not resume');
+    if (Math.abs(frozenAfter - frozenBefore) > 1e-6) problems.push('the aircraft kept flying while paused');
+    if (Math.abs(resumedRate - flyingRate) > Math.max(6, flyingRate * 0.4)) {
+      problems.push(
+        `the frame rate changed from ${flyingRate.toFixed(0)} to ${resumedRate.toFixed(0)} across pause: ` +
+          'a duplicated animation loop',
+      );
+    }
+    await kb.close();
+
     /*
      * The aircraft is simulated on a fixed 60 Hz step. If its rendered transform is
      * not interpolated between steps, a display that refreshes faster than 60 Hz shows
@@ -200,7 +464,7 @@ async function main() {
      * at several hundred frames a second, an un-interpolated aircraft should stand
      * still for most frames and lurch on the rest.
      */
-    console.log('\n5. Is the aircraft smooth on a display faster than the 60 Hz simulation?');
+    console.log('\n7. Is the aircraft smooth on a display faster than the 60 Hz simulation?');
     const fast = await chromium.launch({
       channel: 'chrome',
       args: [
@@ -292,7 +556,7 @@ async function main() {
     await fast.close();
 
     // ---------------------------------------------------------------- teardown
-    console.log('\n4. Does renderer cleanup run cleanly?');
+    console.log('\n8. Does renderer cleanup run cleanly?');
     const teardown = await browser.newPage({ viewport: { width: 800, height: 600 } });
     const teardownErrors = [];
     teardown.on('pageerror', (error) => teardownErrors.push(error.message));
