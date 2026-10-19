@@ -22,11 +22,13 @@ export class PlayerAircraft {
    * @param {object} options.aircraft definition from `data/aircraft.js`
    * @param {import('three').Group} options.model the built airframe
    * @param {'procedural'|'packed'} options.source which pipeline produced the model
+   * @param {{update: Function, dispose: Function}|null} [options.effects] engine glow
    */
-  constructor({ aircraft, model, source = 'procedural' }) {
+  constructor({ aircraft, model, source = 'procedural', effects = null }) {
     this.aircraft = aircraft;
     this.model = model;
     this.source = source;
+    this.effects = effects;
     this.controller = new AircraftController({ attributes: aircraft.attributes });
 
     /** The interpolated transform, and the basis the camera follows. */
@@ -57,6 +59,14 @@ export class PlayerAircraft {
   update(dt, input) {
     if (input) this.controller.setInput(input);
     this.controller.step(dt);
+  }
+
+  /**
+   * Animate the engine glow. Called once per rendered frame, not per simulation
+   * step, so the flicker stays even when several steps run in one frame.
+   */
+  updateEffects(dt) {
+    this.effects?.update?.(this.controller.throttle, this.controller.input.boost, dt);
   }
 
   /** Reset to the start of a run, keeping the interpolation history consistent. */

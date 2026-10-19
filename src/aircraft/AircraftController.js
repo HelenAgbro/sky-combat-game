@@ -7,8 +7,9 @@
  * no renderer, no DOM and no allocation inside the loop, so it can be simulated
  * headlessly in the unit tests.
  */
-import { Euler, MathUtils, Quaternion, Vector3 } from 'three';
-import { FLIGHT, WORLD } from '../game/config.js';
+import { Euler, Quaternion, Vector3 } from 'three';
+import { BOUNDS, FLIGHT } from '../game/config.js';
+import { clamp, headingError, radialDistance } from '../game/math.js';
 
 export const NEUTRAL_INPUT = Object.freeze({
   pitch: 0,
@@ -31,8 +32,7 @@ const _forward = new Vector3();
 const _right = new Vector3();
 const _up = new Vector3();
 
-const clamp = (value, min, max) => MathUtils.clamp(value, min, max);
-const wrap = (value, radius) => (value > radius ? value - radius * 2 : value < -radius ? value + radius * 2 : value);
+const clamp01 = (value) => clamp(value, 0, 1);
 
 /** Turn 0–10 hangar ratings into multipliers. */
 export function scaleFromAttributes({ speed = 5, agility = 5, fuel = 5 } = {}) {
@@ -61,6 +61,9 @@ export class AircraftController {
     this.distance = 0;
     this.input = { ...NEUTRAL_INPUT };
     this.attributeScale = scaleFromAttributes(attributes);
+    /** Which flight-area limit, if any, the aircraft is currently against. */
+    this.boundary = 'clear';
+    this.boundaryUrgency = 0;
   }
 
   /** Where the nose points. */
@@ -108,6 +111,8 @@ export class AircraftController {
     this.elapsed = 0;
     this.distance = 0;
     this.input = { ...NEUTRAL_INPUT };
+    this.boundary = 'clear';
+    this.boundaryUrgency = 0;
   }
 
   /** Advance the aircraft by one fixed step. */
@@ -155,8 +160,8 @@ export class AircraftController {
     // Integrate the flight path.
     _forward.copy(LOCAL_FORWARD).applyQuaternion(this.quaternion);
     this.position.addScaledVector(_forward, this.speed * dt);
-    this.position.x = wrap(this.position.x, WORLD.wrapRadius);
-    this.position.z = wrap(this.position.z, WORLD.wrapRadius);
+
+    this.boundary = this.#applyBoundaries(dt, _forward);
 
     // Fuel burn: idle burns less than full throttle, and boost burns far more.
     const burn =
@@ -170,6 +175,62 @@ export class AircraftController {
     this.elapsed += dt;
   }
 
+  /**
+   * Keep the flight inside the play area.
+   *
+   * The floor, the ceiling and the outer wall all work by *turning the aircraft*
+   * rather than teleporting it: an invisible wall that simply stopped it would read
+   * as a bug, whereas a nudge on the nose reads as the edge of the combat area. A
+   * hard clamp is kept as the last resort, and the state is reported so the
+   * interface can warn the player.
+   *
+   * @returns {'clear'|'altitude'|'edge'} which limit, if any, is being pushed against
+   */
+  #applyBoundaries(dt, forward) {
+    let boundary = 'clear';
+    let urgency = 0;
+
+    const lowUrgency = clamp01(
+      (BOUNDS.minAltitude + BOUNDS.altitudeBand - this.position.y) / BOUNDS.altitudeBand,
+    );
+    const highUrgency = clamp01(
+      (this.position.y - (BOUNDS.maxAltitude - BOUNDS.altitudeBand)) / BOUNDS.altitudeBand,
+    );
+    const altitudeUrgency = Math.max(lowUrgency, highUrgency);
+
+    if (altitudeUrgency > 0) {
+      boundary = 'altitude';
+      urgency = altitudeUrgency;
+      // A positive pitch raises the nose, so the floor pitches up and the ceiling down.
+      const direction = lowUrgency >= highUrgency ? 1 : -1;
+      _euler.set(direction * altitudeUrgency * BOUNDS.correctionRate * dt, 0, 0, 'XYZ');
+      this.quaternion.multiply(_spin.setFromEuler(_euler));
+      this.position.y = clamp(this.position.y, BOUNDS.minAltitude, BOUNDS.maxAltitude);
+    }
+
+    const radius = radialDistance(this.position.x, this.position.z);
+    if (radius > BOUNDS.softRadius) {
+      boundary = 'edge';
+      const edgeUrgency = clamp01((radius - BOUNDS.softRadius) / (BOUNDS.hardRadius - BOUNDS.softRadius));
+      urgency = Math.max(urgency, edgeUrgency);
+
+      // Steer back toward the middle of the area, in proportion to how far out we are.
+      const error = headingError(forward.x, forward.z, -this.position.x / radius, -this.position.z / radius);
+      this.quaternion.premultiply(
+        _worldSpin.setFromAxisAngle(WORLD_UP, clamp(error, -1, 1) * BOUNDS.correctionRate * edgeUrgency * dt),
+      );
+
+      if (radius > BOUNDS.hardRadius) {
+        const pull = BOUNDS.hardRadius / radius;
+        this.position.x *= pull;
+        this.position.z *= pull;
+      }
+    }
+
+    this.boundaryUrgency = urgency;
+    return boundary;
+  }
+
   /** A snapshot for the HUD, the results screen and the tests. */
   telemetry() {
     return {
@@ -179,7 +240,11 @@ export class AircraftController {
       distance: this.distance,
       altitude: this.altitude,
       bank: this.bankAngle,
+      pitch: Math.asin(clamp(LOCAL_FORWARD.clone().applyQuaternion(this.quaternion).y, -1, 1)),
+      radius: radialDistance(this.position.x, this.position.z),
       elapsed: this.elapsed,
+      boundary: this.boundary,
+      boundaryUrgency: this.boundaryUrgency,
     };
   }
 }

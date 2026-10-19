@@ -311,6 +311,27 @@ export function createPaintTextureSet(livery, { size = 1024, seed = 7, markings 
 }
 
 /**
+ * A soft radial glow, for engine exhaust and impact flashes.
+ * White at the centre fading to transparent, so it can be tinted and added.
+ */
+export function createGlowTexture({ size = 128 } = {}) {
+  const canvas = createCanvas(size);
+  const context = canvas.getContext('2d');
+  const half = size / 2;
+  const gradient = context.createRadialGradient(half, half, 0, half, half, half);
+  gradient.addColorStop(0, 'rgba(255,255,255,1)');
+  gradient.addColorStop(0.25, 'rgba(255,255,255,0.55)');
+  gradient.addColorStop(0.55, 'rgba(255,255,255,0.16)');
+  gradient.addColorStop(1, 'rgba(255,255,255,0)');
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, size, size);
+
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  return texture;
+}
+
+/**
  * Sea surface maps.
  *
  * Today that is a wave normal map built from summed sine waves, so it tiles

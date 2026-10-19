@@ -37,9 +37,13 @@ export class Game {
   /** Bound listener handles, declared here because they are assigned in a method. */
   #onResize;
   #onVisibility;
+  /** Unsubscribes the keyboard pause action. */
+  #unsubscribeInput = null;
 
-  constructor({ canvas }) {
+  constructor({ canvas, input = null }) {
     this.canvas = canvas;
+    /** The control source. The menu backdrop flies itself, so this may be absent. */
+    this.input = input;
     this.state = new GameState(STATES.BOOT);
     this.listeners = new Map();
     this.accumulator = 0;
@@ -107,12 +111,15 @@ export class Game {
     this.scene.add(this.world.group);
 
     this.factory = new AircraftFactory({ anisotropy: this.quality.preset.anisotropy });
-    const { aircraft, group, source } = await this.factory.create(DEFAULT_AIRCRAFT_ID);
-    this.aircraft = new PlayerAircraft({ aircraft, model: group, source });
+    const { aircraft, group, source, effects } = await this.factory.create(DEFAULT_AIRCRAFT_ID);
+    this.aircraft = new PlayerAircraft({ aircraft, model: group, source, effects });
     this.scene.add(this.aircraft.object3D);
 
     this.cameraRig = new CameraController(this.camera);
     this.cameraRig.snap(this.aircraft);
+
+    // One key press, one toggle: the InputManager reports the edge, not the held key.
+    this.#unsubscribeInput = this.input?.on('pause', () => this.togglePause()) ?? null;
 
     this.#addEventListeners();
     this.state.set(STATES.MENU);
@@ -150,13 +157,32 @@ export class Game {
     return true;
   }
 
+  /**
+   * Hold the flight. The scene keeps rendering, which is what makes a pause look
+   * like a pause rather than a freeze — and means pause never needs a second loop.
+   * @returns {boolean} whether the state actually changed
+   */
   pause() {
-    if (this.state.set(STATES.PAUSED)) this.emit('paused');
+    if (!this.state.set(STATES.PAUSED)) return false;
+    this.emit('paused');
+    return true;
   }
 
+  /** Release the hold. Safe to call when not paused. */
   resume() {
-    if (this.state.is(STATES.PAUSED)) this.state.set(STATES.FLYING);
+    if (this.state.is(STATES.PAUSED)) {
+      this.state.set(STATES.FLYING);
+      this.emit('resumed');
+    }
     this.#run();
+    return true;
+  }
+
+  /** What the pause key does: one press, one change, whichever way it goes. */
+  togglePause() {
+    if (this.state.is(STATES.FLYING)) return this.pause();
+    if (this.state.is(STATES.PAUSED)) return this.resume();
+    return false;
   }
 
   /** Return to the menu, keeping the aircraft flying as a backdrop. */
@@ -227,6 +253,7 @@ export class Game {
      * several frames and then jumping, which reads as a shiver or a ghosted jet.
      */
     this.aircraft.sync(this.accumulator / step);
+    this.aircraft.updateEffects(dt);
 
     const focus = this.aircraft.renderPosition;
     this.sky.update(this.camera);
@@ -239,6 +266,12 @@ export class Game {
   #simulate(step) {
     // A paused or failed game holds its last state; everything else keeps flying.
     if (this.state.is(STATES.PAUSED, STATES.ERROR)) return;
+
+    // Flying is the player's aircraft; the menu backdrop flies itself.
+    if (this.state.is(STATES.FLYING)) {
+      this.aircraft.update(step, this.input?.read());
+      return;
+    }
     this.aircraft.update(step, this.#demoInput(step));
   }
 
@@ -298,6 +331,8 @@ export class Game {
   dispose() {
     this.renderer.setAnimationLoop(null);
     this.started = false;
+    this.#unsubscribeInput?.();
+    this.#unsubscribeInput = null;
     window.removeEventListener('resize', this.#onResize);
     window.removeEventListener('orientationchange', this.#onResize);
     document.removeEventListener('visibilitychange', this.#onVisibility);

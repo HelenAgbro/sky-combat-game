@@ -18,6 +18,7 @@ import { buildFighter } from '../assets/models/Fighter.js';
 import { loadPackedModel } from '../assets/modelRegistry.js';
 import { createPaintTextureSet } from '../assets/textures.js';
 import { getAircraft } from '../data/aircraft.js';
+import { EngineGlow } from '../scene/Effects.js';
 
 /** A stable seed per aircraft, so each one gets its own panel layout. */
 function seedFor(id) {
@@ -43,14 +44,21 @@ export class AircraftFactory {
     const aircraft = getAircraft(id);
     const packed = await loadPackedModel(aircraft.id);
 
+    // The engine glow is added whichever way the airframe was built, because it is
+    // driven by the shape data rather than by the model.
+    const glow = new EngineGlow(aircraft.shape, aircraft.livery);
+    this.#disposables.push(glow);
+
     if (packed) {
       this.#preparePackedModel(packed);
-      return { aircraft, group: packed, source: 'packed' };
+      packed.add(glow.group);
+      return { aircraft, group: packed, source: 'packed', effects: glow };
     }
 
     const materials = this.#createMaterials(aircraft);
     const group = buildFighter(aircraft.shape, materials);
-    return { aircraft, group, source: 'procedural' };
+    group.add(glow.group);
+    return { aircraft, group, source: 'procedural', effects: glow };
   }
 
   /** The material set for one airframe. Textures are generated, never loaded. */

@@ -62,9 +62,9 @@ export const CAMERA = {
    * Horizontal radius of the aircraft that must stay in frame, and the margin kept
    * around it. A portrait frame is narrow horizontally, so the camera pulls back
    * until the wingspan fits — measured, not guessed: at 390x844 the wingtips left
-   * the frame at a fixed offset.
+   * the frame at a fixed offset, and a hard bank brings the wingtips closer still.
    */
-  fitRadius: 7,
+  fitRadius: 8.5,
   fitMargin: 1.15,
   /** How much of the aircraft's roll the camera copies, and the most it will ever roll. */
   rollFollow: 0.4,
@@ -85,11 +85,33 @@ export const WORLD = {
   wrapRadius: 4200,
 };
 
-/**
- * The gentle scripted flight used by the Stage 2 prototype until player input arrives.
- * It commands a bank *angle* rather than a roll rate, so the weave is a stable
- * S-turn instead of a continuous barrel roll.
- */
+/** Flight-area boundaries. The limits are enforced by turning the aircraft, not teleporting it. */
+export const BOUNDS = {
+  /** Hard floor, comfortably above the sea. */
+  minAltitude: 60,
+  /** Hard ceiling. */
+  maxAltitude: 1800,
+  /** Within this band of either limit the aircraft is eased back automatically. */
+  altitudeBand: 130,
+  /** Beyond this radius the aircraft is gently turned back toward the centre. */
+  softRadius: 3400,
+  /** It is never allowed beyond this radius. */
+  hardRadius: 4200,
+  /** How hard the boundary turns the nose back, in radians per second at full urgency. */
+  correctionRate: 1.6,
+};
+
+/** Touch controls. */
+export const TOUCH = {
+  /** Fraction of the viewport width used as the steering zone. */
+  stickZoneWidth: 0.5,
+  /** Ignore stick movement below this fraction of full travel, so a resting thumb is still. */
+  deadZone: 0.14,
+  /** Stick travel in pixels for full deflection. */
+  stickTravel: 58,
+};
+
+/** The gentle scripted flight used for the menu backdrop until the player takes over. */
 export const DEMO_FLIGHT = {
   throttle: 0.72,
   bankAmplitude: 0.42,
