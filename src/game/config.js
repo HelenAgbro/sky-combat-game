@@ -54,10 +54,18 @@ export const FLIGHT = {
 /** Third-person chase camera. */
 export const CAMERA = {
   /** Behind and above a 15 m aircraft, far enough back to read its whole shape. */
-  offset: { x: 0, y: 5.6, z: 24 },
-  lookAhead: 20,
+  offset: { x: 0, y: 5, z: 21 },
+  lookAhead: 18,
   positionDamping: 9,
   rotationDamping: 7,
+  /**
+   * Horizontal radius of the aircraft that must stay in frame, and the margin kept
+   * around it. A portrait frame is narrow horizontally, so the camera pulls back
+   * until the wingspan fits — measured, not guessed: at 390x844 the wingtips left
+   * the frame at a fixed offset.
+   */
+  fitRadius: 7,
+  fitMargin: 1.15,
   /** How much of the aircraft's roll the camera copies, and the most it will ever roll. */
   rollFollow: 0.4,
   maxRoll: 0.5,

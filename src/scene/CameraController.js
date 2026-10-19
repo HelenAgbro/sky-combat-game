@@ -83,13 +83,23 @@ export class CameraController {
     _right.crossVectors(_forward, _blendedUp).normalize();
     _up.crossVectors(_right, _forward).normalize();
 
+    // The camera sits `distance` behind. In a portrait frame the horizontal field of
+    // view is narrow, so the distance grows until the aircraft's wingspan fits with a
+    // margin — that is what keeps the whole aircraft visible on a phone.
+    const halfVertical = MathUtils.degToRad(this.#camera.fov) * 0.5;
+    const halfHorizontal = Math.atan(Math.tan(halfVertical) * this.#camera.aspect);
+    const limiting = Math.max(0.05, Math.min(halfVertical, halfHorizontal));
+    const fit = (CAMERA.fitRadius / Math.tan(limiting)) * CAMERA.fitMargin;
+    const distance = Math.max(this.offset.z, fit);
+    const scale = distance / this.offset.z;
+
     _desired
       .copy(aircraft.position)
-      .addScaledVector(_right, this.offset.x)
-      .addScaledVector(_up, this.offset.y)
-      .addScaledVector(_forward, -this.offset.z);
+      .addScaledVector(_right, this.offset.x * scale)
+      .addScaledVector(_up, this.offset.y * scale)
+      .addScaledVector(_forward, -distance);
 
-    _lookAt.copy(aircraft.position).addScaledVector(_forward, CAMERA.lookAhead);
+    _lookAt.copy(aircraft.position).addScaledVector(_forward, CAMERA.lookAhead * scale);
   }
 
   update(dt, aircraft) {
