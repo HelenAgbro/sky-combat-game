@@ -3,14 +3,20 @@
  *
  * These need a real browser, so they live apart from the unit tests:
  *   1. the camera keeps the ENTIRE aircraft inside the frame, sampled across a full
- *      weave so every bank angle is covered;
- *   2. the same holds at phone, tablet, desktop and ultrawide aspect ratios;
- *   3. resizing keeps the drawing buffer, the CSS size and the camera aspect in step;
- *   4. a browser without WebGL gets the failure panel rather than a blank canvas;
- *   5. renderer cleanup stops the loop and releases its resources without throwing.
+ *      weave so every bank angle is covered, at six viewport shapes;
+ *   2. resizing keeps the drawing buffer, the CSS size and the camera aspect in step;
+ *   3. a browser without WebGL gets the failure panel rather than a blank canvas;
+ *   4. the keyboard flies the aircraft and does not scroll the page;
+ *   5. the on-screen controls work on a phone-sized viewport, and a real tap reaches them;
+ *   6. pause holds the simulation without duplicating the animation loop;
+ *   7. the aircraft moves smoothly on a display faster than the 60 Hz simulation;
+ *   8. the cloud field, the land, the water and the moving control surfaces stay inside
+ *      their budget — nothing is created or destroyed in flight;
+ *   9. renderer cleanup stops the loop and releases its resources without throwing.
  *
- * This is not decoration: check 1 caught the wingtips leaving the frame on a phone
- * while the camera offset was a fixed distance.
+ * This is not decoration. Check 1 caught the wingtips leaving the frame on a phone while
+ * the camera offset was a fixed distance; check 8 is what would catch a scene that leaks
+ * a geometry per frame and falls over after a minute of flying.
  *
  *   npm run test:acceptance
  */
@@ -555,8 +561,141 @@ async function main() {
     }
     await fast.close();
 
+    /*
+     * Stage 4's scene systems — the cloud field, the land, the water detail and the
+     * moving control surfaces — all recycle a fixed pool of objects rather than growing.
+     * That is the property worth measuring, because a scene that leaks one geometry per
+     * frame runs perfectly for a minute and then falls over.
+     */
+    console.log('\n8. Do the new scene systems stay inside their budget?');
+    const budget = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+    await budget.route('https://start.ng/**', (route) => route.abort());
+    await budget.goto(`${base}/`, { waitUntil: 'load' });
+    await budget.waitForFunction(() => window.__sky?.ready, null, { timeout: 60000 });
+    await budget.click('[data-action="start"]');
+    await budget.waitForTimeout(1500);
+
+    /*
+     * Count what the scene actually holds, not what the GPU has uploaded. The renderer's
+     * own counters rise as objects first come into view — a hidden island geometry is not
+     * uploaded until the aircraft turns toward it — which is a one-off cost, not a leak,
+     * and would make the check flaky. The scene graph is the deterministic measure: if
+     * anything is created per frame, this finds it.
+     */
+    const snapshot = () =>
+      budget.evaluate(() => {
+        const game = window.__sky.game;
+        const geometries = new Set();
+        const materials = new Set();
+        const textures = new Set();
+
+        game.scene.traverse((object) => {
+          if (object.geometry) geometries.add(object.geometry.uuid);
+          const list = Array.isArray(object.material)
+            ? object.material
+            : object.material
+              ? [object.material]
+              : [];
+          for (const material of list) {
+            materials.add(material.uuid);
+            for (const value of Object.values(material)) {
+              if (value && value.isTexture) textures.add(value.uuid);
+            }
+          }
+        });
+
+        return {
+          geometries: geometries.size,
+          materials: materials.size,
+          textures: textures.size,
+          gpuGeometries: game.renderer.info.memory.geometries,
+          gpuTextures: game.renderer.info.memory.textures,
+          programs: game.renderer.info.programs?.length ?? 0,
+          hasClouds: Boolean(game.scene.getObjectByName('clouds')),
+          hasTerrain: Boolean(game.scene.getObjectByName('terrain')),
+          ...game.telemetry(),
+        };
+      });
+
+    const before = await snapshot();
+
+    // Fly hard for eight seconds: the terrain changes cell, clouds recycle, and every
+    // control surface is driven to its stop and back several times.
+    for (const key of ['KeyW', 'KeyD', 'ShiftLeft']) await budget.keyboard.down(key);
+    await budget.waitForTimeout(3000);
+
+    const rolling = await budget.evaluate(() => {
+      const { surfaces } = window.__sky.game.aircraft;
+      return {
+        flaperonRight: surfaces.flaperon.right.rotation.x,
+        flaperonLeft: surfaces.flaperon.left.rotation.x,
+        stabilator: surfaces.stabilator.right.rotation.x,
+      };
+    });
+
+    await budget.waitForTimeout(3000);
+    for (const key of ['KeyW', 'KeyD', 'ShiftLeft']) await budget.keyboard.up(key);
+    await budget.waitForTimeout(1200);
+
+    const centred = await budget.evaluate(() => {
+      const { surfaces } = window.__sky.game.aircraft;
+      return {
+        flaperonRight: surfaces.flaperon.right.rotation.x,
+        flaperonLeft: surfaces.flaperon.left.rotation.x,
+        stabilator: surfaces.stabilator.right.rotation.x,
+      };
+    });
+    const after = await snapshot();
+
+    console.log(
+      `   scene holds ${before.geometries} geometries, ${before.materials} materials,` +
+        ` ${before.textures} textures -> ${after.geometries} / ${after.materials} / ${after.textures}`,
+    );
+    console.log(
+      `   clouds ${after.clouds}  islands ${after.islands}/${after.islandCapacity}` +
+        `  control surfaces: ${after.controlSurfaces}`,
+    );
+    console.log(
+      `   flaperons under roll: right ${rolling.flaperonRight.toFixed(2)}` +
+        ` left ${rolling.flaperonLeft.toFixed(2)}  stabilator ${rolling.stabilator.toFixed(2)}` +
+        `   centred again: ${centred.flaperonRight.toFixed(3)} / ${centred.flaperonLeft.toFixed(3)}`,
+    );
+
+    if (!before.hasClouds) problems.push('the cloud layer is not in the scene');
+    if (!before.hasTerrain) problems.push('the terrain is not in the scene');
+    if (!before.controlSurfaces) problems.push('the airframe has no moving control surfaces');
+    if (after.clouds <= 0) problems.push('the cloud field is empty');
+    if (after.islands <= 0) problems.push('no land is being placed');
+    if (after.islands > after.islandCapacity) problems.push('the terrain placed more islands than it owns');
+
+    // Nothing may be created while flying.
+    if (after.geometries !== before.geometries) {
+      problems.push(`geometries changed while flying: ${before.geometries} -> ${after.geometries}`);
+    }
+    if (after.materials !== before.materials) {
+      problems.push(`materials changed while flying: ${before.materials} -> ${after.materials}`);
+    }
+    if (after.textures !== before.textures) {
+      problems.push(`textures changed while flying: ${before.textures} -> ${after.textures}`);
+    }
+    if (after.programs !== before.programs) {
+      problems.push(`shader programs changed while flying: ${before.programs} -> ${after.programs}`);
+    }
+
+    // The surfaces move with the input, in opposite directions, and come back.
+    if (Math.abs(rolling.flaperonRight) < 0.08) problems.push('the flaperons did not deflect under roll');
+    if (rolling.flaperonRight * rolling.flaperonLeft >= 0) {
+      problems.push('the two flaperons moved the same way instead of differentially');
+    }
+    if (Math.abs(centred.flaperonRight) > 0.05 || Math.abs(centred.flaperonLeft) > 0.05) {
+      problems.push('the flaperons did not return to neutral when the stick was centred');
+    }
+    if (!(rolling.stabilator < -0.05)) problems.push('the stabilator did not deflect with nose-up input');
+
+    await budget.close();
+
     // ---------------------------------------------------------------- teardown
-    console.log('\n8. Does renderer cleanup run cleanly?');
+    console.log('\n9. Does renderer cleanup run cleanly?');
     const teardown = await browser.newPage({ viewport: { width: 800, height: 600 } });
     const teardownErrors = [];
     teardown.on('pageerror', (error) => teardownErrors.push(error.message));

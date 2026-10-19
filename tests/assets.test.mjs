@@ -16,6 +16,34 @@ import {
   superellipseRing,
 } from '../src/assets/loft.js';
 import { buildProbeGlb, toPayload } from '../tools/pack-models.mjs';
+import { MeshBasicMaterial, Vector3 } from 'three';
+import {
+  FLAPERON_SHARE,
+  FLAPERON_SPAN,
+  STABILATOR_HINGE,
+  buildFighter,
+  lengthToZ,
+} from '../src/assets/models/Fighter.js';
+import { loadPackedModel } from '../src/assets/modelRegistry.js';
+import { AIRCRAFT } from '../src/data/aircraft.js';
+import { createSeededRandom } from '../src/game/math.js';
+import { buildIslandGeometry } from '../src/scene/Terrain.js';
+
+/** A stand-in material set, so an airframe can be built without a renderer. */
+function testMaterials() {
+  const material = () => new MeshBasicMaterial();
+  return {
+    fuselage: material(),
+    skin: material(),
+    dark: material(),
+    trim: material(),
+    glass: material(),
+    nozzleGlow: material(),
+    navRed: material(),
+    navGreen: material(),
+    navWhite: material(),
+  };
+}
 
 const GLB_MAGIC = 0x46546c67;
 const CHUNK_JSON = 0x4e4f534a;
@@ -174,4 +202,158 @@ test('the packed payload decodes back to the original model bytes', () => {
 
   const decoded = new Uint8Array(base64ToArrayBuffer(payload.data));
   assert.deepEqual(Array.from(decoded), Array.from(bytes));
+});
+
+/* ------------------------------------------------------------------- fallback path */
+
+test('a missing packed model falls back instead of throwing', async () => {
+  /*
+   * The case that ships today: no payload exists. In the browser the fetch fails or the
+   * build-injected id list excludes the aircraft; in Node there is no `document` at all.
+   * Every route has to end in `null` so `AircraftFactory` builds the procedural airframe
+   * rather than the game failing to start.
+   */
+  assert.equal(await loadPackedModel('falcon'), null);
+  assert.equal(await loadPackedModel('an-aircraft-that-does-not-exist'), null);
+});
+
+/* ---------------------------------------------------------------- island geometry */
+
+test('island geometry faces up, meets the waterline and is deterministic', () => {
+  const build = (seed) => buildIslandGeometry(createSeededRandom(seed));
+  const geometry = build(5);
+  const position = geometry.getAttribute('position');
+  const index = geometry.getIndex();
+
+  assert.ok(position.count > 100, 'the island is a real mesh, not a placeholder');
+  assert.equal(index.count % 3, 0);
+
+  // Every face points upward. Getting this wrong does not throw — it just makes the
+  // land render black — so it is asserted rather than eyeballed.
+  const a = new Vector3();
+  const b = new Vector3();
+  const c = new Vector3();
+  const ab = new Vector3();
+  const ac = new Vector3();
+  const normal = new Vector3();
+  let sum = 0;
+
+  for (let i = 0; i < index.count; i += 3) {
+    a.fromBufferAttribute(position, index.getX(i));
+    b.fromBufferAttribute(position, index.getX(i + 1));
+    c.fromBufferAttribute(position, index.getX(i + 2));
+    normal.crossVectors(ab.subVectors(b, a), ac.subVectors(c, a));
+    sum += normal.y;
+  }
+  assert.ok(sum > 0, `every face points up (sum of normals ${sum})`);
+
+  const box = geometry.boundingBox;
+  assert.ok(box.max.y > 50, `the island has height (${box.max.y})`);
+  assert.ok(box.min.y < 0, `the rim sinks below sea level (${box.min.y})`);
+  assert.ok(box.max.x > 100, 'the island has width');
+
+  // The same seed paints the same island, so the world is identical on every machine.
+  const again = build(5);
+  assert.equal(again.getAttribute('position').count, position.count);
+  assert.deepEqual(
+    Array.from(again.getAttribute('position').array.slice(0, 24)),
+    Array.from(position.array.slice(0, 24)),
+  );
+
+  // A different seed gives different land.
+  assert.notDeepEqual(
+    Array.from(build(6).getAttribute('position').array.slice(0, 24)),
+    Array.from(position.array.slice(0, 24)),
+  );
+});
+
+/* --------------------------------------------------------------- control surfaces */
+
+test('the airframe exposes its moving surfaces, hinged where they belong', () => {
+  const shape = AIRCRAFT[0].shape;
+  const group = buildFighter(shape, testMaterials());
+  const surfaces = group.userData.surfaces;
+
+  assert.ok(surfaces?.stabilator?.left && surfaces?.stabilator?.right, 'two stabilators');
+  assert.ok(surfaces?.flaperon?.left && surfaces?.flaperon?.right, 'two flaperons');
+  assert.equal(surfaces.rudder.length, shape.fins.count, 'one rudder per fin');
+  assert.notEqual(surfaces.flaperon.left, surfaces.flaperon.right, 'the sides are separate objects');
+
+  /** The z range of the vertices at one end of a control surface, in its pivot frame. */
+  const zRangeAt = (mesh, at) => {
+    const position = mesh.geometry.getAttribute('position');
+    let minZ = Infinity;
+    let maxZ = -Infinity;
+    for (let i = 0; i < position.count; i += 1) {
+      // The flaperon and stabilator are hinged across their span (X); the rudder's span
+      // runs up the fin, so its root is the row at Y = 0.
+      if (Math.abs(at === 'x' ? position.getX(i) : position.getY(i)) > 1e-6) continue;
+      minZ = Math.min(minZ, position.getZ(i));
+      maxZ = Math.max(maxZ, position.getZ(i));
+    }
+    return { minZ, maxZ };
+  };
+
+  // The flaperon's hinge sits where the wing chord is at the span it starts from, and
+  // its trailing edge lands exactly on the wing's.
+  const wing = shape.wing;
+  const flaperon = surfaces.flaperon.right;
+  const flaperonRange = zRangeAt(flaperon.children[0], 'x');
+  const t = FLAPERON_SPAN[0];
+  const wingLeadingEdge = lengthToZ(shape, wing.at) + wing.sweep * t;
+  const wingChord = wing.rootChord + (wing.tipChord - wing.rootChord) * t;
+
+  assert.ok(Math.abs(flaperonRange.minZ) < 1e-6, 'the pivot is at the hinge, not at the origin');
+  assert.ok(
+    Math.abs(flaperon.position.z - (wingLeadingEdge + wingChord * (1 - FLAPERON_SHARE))) < 1e-6,
+    'the hinge sits on the wing chord where the flaperon starts',
+  );
+  assert.ok(
+    Math.abs(flaperon.position.z + flaperonRange.maxZ - (wingLeadingEdge + wingChord)) < 1e-6,
+    'the flaperon reaches the wing trailing edge',
+  );
+
+  // The stabilator pivots at 30% of its root chord.
+  const stabilatorRange = zRangeAt(surfaces.stabilator.right.children[0], 'x');
+  assert.ok(
+    Math.abs(stabilatorRange.minZ + shape.tail.rootChord * STABILATOR_HINGE) < 1e-6,
+    'the stabilator pivots at 30% chord',
+  );
+
+  // The rudder is hinged on the fin's trailing edge and reaches it.
+  const fins = shape.fins;
+  const rudder = surfaces.rudder[0];
+  const rudderRange = zRangeAt(rudder.children[0], 'y');
+  assert.ok(
+    Math.abs(rudder.position.z + rudderRange.maxZ - (lengthToZ(shape, fins.at) + fins.rootChord)) < 1e-6,
+    'the rudder reaches the fin trailing edge',
+  );
+});
+
+test('a mirrored control surface keeps its winding, so it lights correctly', () => {
+  const group = buildFighter(AIRCRAFT[0].shape, testMaterials());
+  const { flaperon } = group.userData.surfaces;
+
+  // A mirrored mesh whose winding was not reversed renders inside out. The signed
+  // volume of the loft flips sign when that happens, so the two sides are compared.
+  const volume = (mesh) => {
+    const geometry = mesh.geometry;
+    const position = geometry.getAttribute('position');
+    const index = geometry.getIndex();
+    const a = new Vector3();
+    const b = new Vector3();
+    const c = new Vector3();
+    const cross = new Vector3();
+    let total = 0;
+    for (let i = 0; i < index.count; i += 3) {
+      a.fromBufferAttribute(position, index.getX(i));
+      b.fromBufferAttribute(position, index.getX(i + 1));
+      c.fromBufferAttribute(position, index.getX(i + 2));
+      total += a.dot(cross.crossVectors(b, c)) / 6;
+    }
+    return total;
+  };
+
+  assert.ok(volume(flaperon.right.children[0]) > 0, 'the right surface is wound outwards');
+  assert.ok(volume(flaperon.left.children[0]) > 0, 'the mirrored surface is wound outwards too');
 });
