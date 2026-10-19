@@ -1,0 +1,182 @@
+/* Sky Combat — the loading, failure, menu and diagnostic screens. */
+
+/* ---------------------------------------------------------------- loading */
+
+.loading {
+  background: radial-gradient(ellipse at 50% 38%, #16233a 0%, #05080f 72%);
+}
+
+.loading-panel {
+  background: transparent;
+  border: 0;
+  backdrop-filter: none;
+}
+
+.loading-message {
+  margin-top: 18px;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.progress {
+  height: 4px;
+  margin-top: 20px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.progress i {
+  display: block;
+  width: 5%;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.25s ease;
+}
+
+/* ------------------------------------------------------------------ fatal */
+
+.fatal {
+  background: radial-gradient(ellipse at 50% 40%, #1a1f2c 0%, #05070c 75%);
+}
+
+.fatal-title {
+  font-size: 24px;
+  font-weight: 800;
+}
+
+.fatal-message {
+  margin-top: 12px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.fatal-detail {
+  margin-top: 10px;
+  font-size: 13px;
+  opacity: 0.8;
+  word-break: break-word;
+}
+
+.fatal .btn {
+  margin-top: 22px;
+}
+
+/* ------------------------------------------------------------------- menu */
+
+.menu {
+  align-items: flex-end;
+  justify-content: flex-start;
+  background: linear-gradient(
+      100deg,
+      rgba(4, 8, 16, 0.86) 0%,
+      rgba(4, 8, 16, 0.55) 38%,
+      rgba(4, 8, 16, 0) 68%
+    ),
+    linear-gradient(0deg, rgba(4, 8, 16, 0.72) 0%, rgba(4, 8, 16, 0) 45%);
+}
+
+.menu-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(620px, 100%);
+  padding-bottom: 8px;
+}
+
+.eyebrow {
+  margin-bottom: 10px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.tagline {
+  margin-top: 12px;
+  max-width: 34ch;
+  font-size: 17px;
+  line-height: 1.5;
+  color: #cfd9e8;
+}
+
+.menu-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.menu-status {
+  min-height: 18px;
+  margin-top: 14px;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.menu-note {
+  margin-top: 10px;
+  max-width: 52ch;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.aircraft-line {
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
+/* -------------------------------------------------------------- perf meter */
+
+.perf {
+  position: absolute;
+  right: max(14px, env(safe-area-inset-right));
+  bottom: max(14px, env(safe-area-inset-bottom));
+  display: none;
+  gap: 10px;
+  align-items: baseline;
+  padding: 8px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: var(--panel);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+.perf.is-visible {
+  display: flex;
+}
+
+.perf-fps {
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.perf-detail {
+  color: var(--muted);
+}
+
+/* Narrow screens: the menu fills more of the view and the copy tightens up. */
+@media (max-width: 620px) {
+  .menu {
+    align-items: center;
+    background: linear-gradient(0deg, rgba(4, 8, 16, 0.9) 0%, rgba(4, 8, 16, 0.35) 60%, rgba(4, 8, 16, 0.15) 100%);
+  }
+
+  .menu-inner {
+    padding-bottom: 24px;
+    text-align: left;
+  }
+
+  .tagline {
+    font-size: 15px;
+  }
+
+  .btn {
+    padding: 14px 24px;
+    font-size: 16px;
+  }
+}
