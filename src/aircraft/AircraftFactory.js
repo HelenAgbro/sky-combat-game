@@ -10,6 +10,7 @@
 import {
   Color,
   Group,
+  MeshBasicMaterial,
   MeshPhysicalMaterial,
   MeshStandardMaterial,
   Vector2,
@@ -29,10 +30,17 @@ function seedFor(id) {
 
 export class AircraftFactory {
   #anisotropy;
+  #paintTextureSize;
   #disposables = [];
 
-  constructor({ anisotropy = 4 } = {}) {
+  /**
+   * @param {{anisotropy?:number, paintTextureSize?:number}} [options]
+   *   `paintTextureSize` is the quality tier's texture size: the airframe's paint set
+   *   is generated at that size, so a phone gets a 512² set instead of a 1024² one.
+   */
+  constructor({ anisotropy = 4, paintTextureSize = 1024 } = {}) {
     this.#anisotropy = anisotropy;
+    this.#paintTextureSize = paintTextureSize;
   }
 
   /**
@@ -44,19 +52,24 @@ export class AircraftFactory {
     const aircraft = getAircraft(id);
     const packed = await loadPackedModel(aircraft.id);
 
-    // The engine glow is added whichever way the airframe was built, because it is
-    // driven by the shape data rather than by the model.
-    const glow = new EngineGlow(aircraft.shape, aircraft.livery);
-    this.#disposables.push(glow);
-
     if (packed) {
       this.#preparePackedModel(packed);
+      // A packed model brings its own materials, so there is no nozzle material for the
+      // afterburner to drive; the plume alone carries the effect.
+      const glow = new EngineGlow(aircraft.shape, aircraft.livery);
+      this.#disposables.push(glow);
       packed.add(glow.group);
       return { aircraft, group: packed, source: 'packed', effects: glow };
     }
 
     const materials = this.#createMaterials(aircraft);
     const group = buildFighter(aircraft.shape, materials);
+    // The engine glow is added whichever way the airframe was built, because it is
+    // driven by the shape data rather than by the model.
+    const glow = new EngineGlow(aircraft.shape, aircraft.livery, {
+      nozzleMaterial: materials.nozzleGlow,
+    });
+    this.#disposables.push(glow);
     group.add(glow.group);
     return { aircraft, group, source: 'procedural', effects: glow };
   }
@@ -65,15 +78,17 @@ export class AircraftFactory {
   #createMaterials(aircraft) {
     // The fuselage carries the roundel, stencils and squadron flash. Wings,
     // tailplanes and fins get the same panel layout without them, because their
-    // UVs run across the span and a fuselage stencil lands in the wrong place.
+    // UVs run across the span and a fuselage stencil lands in the wrong place — and at
+    // half the size, since nothing on them needs to resolve fine lettering.
     const marked = createPaintTextureSet(aircraft.livery, {
       seed: seedFor(aircraft.id),
       markings: aircraft.markings,
+      size: this.#paintTextureSize,
     });
     const plain = createPaintTextureSet(aircraft.livery, {
       seed: seedFor(aircraft.id),
       markings: false,
-      size: 512,
+      size: Math.max(256, Math.round(this.#paintTextureSize / 2)),
     });
 
     for (const texture of [...Object.values(marked), ...Object.values(plain)]) {
@@ -135,7 +150,18 @@ export class AircraftFactory {
       roughness: 0.5,
     });
 
-    const materials = { fuselage, skin, dark, trim, glass, nozzleGlow };
+    /*
+     * Navigation lights. Unlit and untone-mapped, so they stay a saturated point of
+     * colour however bright the sky behind them is — which is exactly what a light is
+     * for. Three of them, one sphere each: the cheapest thing that reads as a light at
+     * the distance the chase camera sits.
+     */
+    const nav = (color) => new MeshBasicMaterial({ color: new Color(color), toneMapped: false });
+    const navRed = nav('#ff2f2f');
+    const navGreen = nav('#38ff6a');
+    const navWhite = nav('#fff4e2');
+
+    const materials = { fuselage, skin, dark, trim, glass, nozzleGlow, navRed, navGreen, navWhite };
     this.#disposables.push(...Object.values(materials));
     return materials;
   }

@@ -11,6 +11,8 @@
  */
 import { Quaternion, Vector3 } from 'three';
 import { AircraftController } from './AircraftController.js';
+import { SURFACE_RATE, surfaceAngles } from './surfaces.js';
+import { damp } from '../game/math.js';
 
 const LOCAL_FORWARD = new Vector3(0, 0, -1);
 const LOCAL_RIGHT = new Vector3(1, 0, 0);
@@ -30,6 +32,13 @@ export class PlayerAircraft {
     this.source = source;
     this.effects = effects;
     this.controller = new AircraftController({ attributes: aircraft.attributes });
+
+    /**
+     * The moving surfaces of the airframe, if it has any. A packed model brings its
+     * own; a model with no control surfaces simply gets nothing to move.
+     */
+    this.surfaces = model.userData?.surfaces ?? null;
+    this.surfaceState = { stabilator: 0, flaperon: 0, rudder: 0 };
 
     /** The interpolated transform, and the basis the camera follows. */
     this.renderPosition = new Vector3();
@@ -62,11 +71,41 @@ export class PlayerAircraft {
   }
 
   /**
-   * Animate the engine glow. Called once per rendered frame, not per simulation
-   * step, so the flicker stays even when several steps run in one frame.
+   * Animate the engine glow and the control surfaces. Called once per rendered frame,
+   * not per simulation step, so the flicker stays even when several steps run in one
+   * frame.
    */
   updateEffects(dt) {
     this.effects?.update?.(this.controller.throttle, this.controller.input.boost, dt);
+    this.updateSurfaces(dt);
+  }
+
+  /**
+   * Deflect the stabilators, flaperons and rudder toward the commanded angles.
+   *
+   * Damped rather than snapped: an actuator takes a moment to reach full deflection,
+   * and a surface that jumps to its stop reads as a glitch. The rate is exponential and
+   * time-based for the same reason the camera damping is — the surfaces must move at
+   * the same speed at 30 fps and at 240.
+   */
+  updateSurfaces(dt) {
+    if (!this.surfaces) return;
+
+    const target = surfaceAngles(this.controller.input);
+    const state = this.surfaceState;
+    state.stabilator = damp(state.stabilator, target.stabilator, SURFACE_RATE, dt);
+    state.flaperon = damp(state.flaperon, target.flaperon, SURFACE_RATE, dt);
+    state.rudder = damp(state.rudder, target.rudder, SURFACE_RATE, dt);
+
+    const { stabilator, flaperon, rudder } = this.surfaces;
+    stabilator.right.rotation.x = state.stabilator;
+    stabilator.left.rotation.x = state.stabilator;
+
+    // Differential: the wing that should rise drops its flaperon, the other raises it.
+    flaperon.right.rotation.x = -state.flaperon;
+    flaperon.left.rotation.x = state.flaperon;
+
+    for (const surface of rudder) surface.rotation.y = state.rudder;
   }
 
   /** Reset to the start of a run, keeping the interpolation history consistent. */
