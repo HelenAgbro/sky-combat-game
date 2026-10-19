@@ -1,0 +1,32 @@
+{
+  "name": "sky-combat",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Sky Combat — a 3D aerial combat arcade game for start.ng",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "serve": "node tools/serve.mjs dist 5173",
+    "smoke": "node tests/smoke.mjs test-results",
+    "test:unit": "node --test tests/*.test.mjs",
+    "test": "npm run test:unit && npm run smoke",
+    "cover": "node tools/cover.mjs",
+    "models": "node tools/pack-models.mjs",
+    "models:probe": "node tools/pack-models.mjs --probe",
+    "startng:check": "node tools/check.mjs",
+    "startng:publish": "node tools/publish.mjs"
+  },
+  "dependencies": {
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.64.1",
+    "vite": "^8.3.4"
+  }
+}

@@ -1,0 +1,12 @@
+node_modules/
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*
+.env
+.env.*
+.vite/
+test-results/
+
+# dist/ is deliberately NOT ignored: start.ng serves the already-built game from
+# the repository and never runs a build step, so the built output must be committed.
