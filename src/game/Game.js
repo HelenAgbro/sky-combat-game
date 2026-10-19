@@ -142,7 +142,7 @@ export class Game {
 
   /** Begin a flight. */
   start() {
-    this.aircraft.controller.reset();
+    this.aircraft.reset();
     this.cameraRig.snap(this.aircraft);
     this.accumulator = 0;
     if (!this.state.set(STATES.FLYING)) return false;
@@ -163,7 +163,7 @@ export class Game {
   toMenu() {
     if (this.state.is(STATES.ERROR)) return false;
     this.state.set(STATES.MENU);
-    this.aircraft.controller.reset();
+    this.aircraft.reset();
     this.cameraRig.snap(this.aircraft);
     this.#run();
     return true;
@@ -220,9 +220,18 @@ export class Game {
       this.accumulator -= step;
     }
 
+    /*
+     * Interpolate the rendered transform between the last two simulation states.
+     * Without this, a display refreshing faster than the 60 Hz simulation — or one
+     * whose frame times straddle the step boundary — shows the aircraft frozen for
+     * several frames and then jumping, which reads as a shiver or a ghosted jet.
+     */
+    this.aircraft.sync(this.accumulator / step);
+
+    const focus = this.aircraft.renderPosition;
     this.sky.update(this.camera);
-    this.lighting.update(this.sky.sunDirection, this.aircraft.position);
-    this.world.update(dt, this.aircraft.position);
+    this.lighting.update(this.sky.sunDirection, focus);
+    this.world.update(dt, focus);
     if (this.cameraOverride) this.cameraOverride(this.camera, this.aircraft);
     else this.cameraRig.update(dt, this.aircraft);
   }

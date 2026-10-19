@@ -60,8 +60,8 @@ export class CameraController {
    * when the aircraft is inverted, and keeps the horizon readable while banking.
    */
   #composeUp(aircraft) {
-    _up.copy(aircraft.controller.up);
-    _right.copy(aircraft.controller.right);
+    _up.copy(aircraft.up);
+    _right.copy(aircraft.right);
 
     const roll = Math.atan2(_right.y, _up.y);
     const limited = clamp(-roll * CAMERA.rollFollow, -CAMERA.maxRoll, CAMERA.maxRoll);
@@ -77,7 +77,7 @@ export class CameraController {
 
   /** Compute the ideal position and the look-at point for this frame. */
   #composeDesired(aircraft) {
-    _forward.copy(aircraft.controller.forward);
+    _forward.copy(aircraft.forward);
     this.#composeUp(aircraft);
 
     _right.crossVectors(_forward, _blendedUp).normalize();
@@ -94,12 +94,12 @@ export class CameraController {
     const scale = distance / this.offset.z;
 
     _desired
-      .copy(aircraft.position)
+      .copy(aircraft.renderPosition)
       .addScaledVector(_right, this.offset.x * scale)
       .addScaledVector(_up, this.offset.y * scale)
       .addScaledVector(_forward, -distance);
 
-    _lookAt.copy(aircraft.position).addScaledVector(_forward, CAMERA.lookAhead * scale);
+    _lookAt.copy(aircraft.renderPosition).addScaledVector(_forward, CAMERA.lookAhead * scale);
   }
 
   update(dt, aircraft) {
@@ -114,7 +114,7 @@ export class CameraController {
     // (about 16 m at full speed), which loses the intended framing. Adding the
     // velocity back cancels that steady-state lag while transients still ease.
     _velocity
-      .copy(aircraft.controller.forward)
+      .copy(aircraft.forward)
       .multiplyScalar(aircraft.controller.speed / this.#positionDamping);
     _desired.add(_velocity);
 

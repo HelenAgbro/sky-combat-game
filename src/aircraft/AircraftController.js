@@ -47,6 +47,13 @@ export class AircraftController {
   constructor({ attributes = {}, position = null } = {}) {
     this.position = position ? position.clone() : new Vector3(0, FLIGHT.startAltitude, 0);
     this.quaternion = new Quaternion();
+    /**
+     * The state at the end of the previous step. The renderer interpolates between
+     * these two states, so the aircraft moves smoothly on a display that refreshes
+     * faster — or more irregularly — than the fixed 60 Hz simulation.
+     */
+    this.previousPosition = this.position.clone();
+    this.previousQuaternion = new Quaternion();
     this.speed = FLIGHT.cruiseSpeed;
     this.throttle = 0.6;
     this.fuel = 1;
@@ -92,6 +99,9 @@ export class AircraftController {
     this.position.set(0, altitude, 0);
     if (position) this.position.copy(position);
     this.quaternion.identity();
+    // Keep the interpolation history consistent, or the first rendered frame jumps.
+    this.previousPosition.copy(this.position);
+    this.previousQuaternion.copy(this.quaternion);
     this.speed = FLIGHT.cruiseSpeed;
     this.throttle = 0.6;
     this.fuel = 1;
@@ -102,6 +112,10 @@ export class AircraftController {
 
   /** Advance the aircraft by one fixed step. */
   step(dt) {
+    // Remember where this step started, so the renderer can interpolate across it.
+    this.previousPosition.copy(this.position);
+    this.previousQuaternion.copy(this.quaternion);
+
     const { input } = this;
     const scale = this.attributeScale;
     const agility = scale.agility;

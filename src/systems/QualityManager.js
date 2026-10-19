@@ -129,11 +129,18 @@ export class QualityManager {
   /**
    * Feed one frame's duration. When the recent average drifts away from the
    * budget, the render scale moves in small steps so the change is never visible.
+   *
+   * The two thresholds are deliberately far apart and a change is followed by a
+   * long cooldown: scaling up and back down again every second would show as a
+   * shimmer, which is worse than the frame time it is trying to fix.
    */
   update(frameMs) {
     this.#frameTimes.push(frameMs);
     if (this.#frameTimes.length > 60) this.#frameTimes.shift();
-    if (this.#frameTimes.length < 30 || this.#cooldown-- > 0) return;
+    if (this.#frameTimes.length < 30 || this.#cooldown > 0) {
+      this.#cooldown -= 1;
+      return;
+    }
 
     const average = this.#frameTimes.reduce((sum, value) => sum + value, 0) / this.#frameTimes.length;
     const budget = 1000 / 60;
@@ -141,14 +148,14 @@ export class QualityManager {
 
     if (average > budget * 1.35 && this.#renderScale > floor) {
       this.#renderScale = Math.max(floor, this.#renderScale - 0.05);
-    } else if (average < budget * 0.82 && this.#renderScale < ceiling) {
+    } else if (average < budget * 0.78 && this.#renderScale < ceiling) {
       this.#renderScale = Math.min(ceiling, this.#renderScale + 0.05);
     } else {
       return;
     }
 
     this.#frameTimes.length = 0;
-    this.#cooldown = 30;
+    this.#cooldown = 90;
     this.resize();
   }
 }
