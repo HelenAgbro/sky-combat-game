@@ -6,8 +6,16 @@
  * 30, 60, 144 or 240 frames a second.
  */
 
-/** Clamp a value into a range. */
+/**
+ * Clamp a value into a range.
+ *
+ * A `NaN` is clamped to the minimum rather than passed through. A NaN reaching a
+ * transform makes the object disappear from the scene entirely, which is a far worse
+ * failure than a wrong-but-finite value — and one bad number in an input would
+ * otherwise be enough to cause it.
+ */
 export function clamp(value, min, max) {
+  if (Number.isNaN(value)) return min;
   return value < min ? min : value > max ? max : value;
 }
 
@@ -35,4 +43,22 @@ export function headingError(fromX, fromZ, toX, toZ) {
 /** Shortest distance from a point to a circle of `radius` centred on the origin, in the XZ plane. */
 export function radialDistance(x, z) {
   return Math.hypot(x, z);
+}
+
+/**
+ * A small deterministic PRNG (xorshift32), returning values in [0, 1).
+ *
+ * Every generated thing in this game — paint, panel lines, clouds, islands — is
+ * driven from this, so a build looks identical on every machine and every run. It
+ * lives here rather than in the texture factory so the cloud and island layout
+ * modules can use it without importing anything that touches the DOM.
+ */
+export function createSeededRandom(seed = 1) {
+  let state = seed >>> 0 || 1;
+  return () => {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    return ((state >>> 0) % 100000) / 100000;
+  };
 }

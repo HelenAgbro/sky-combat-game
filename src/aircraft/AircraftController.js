@@ -133,10 +133,17 @@ export class AircraftController {
     const targetSpeed = FLIGHT.minSpeed + (ceiling - FLIGHT.minSpeed) * this.throttle;
     this.speed += (targetSpeed - this.speed) * Math.min(1, FLIGHT.speedResponse * dt);
 
-    // Body-frame rotation: pitch about X, rudder about Y, roll about Z.
+    /*
+     * Body-frame rotation: pitch about X, rudder about Y, roll about Z.
+     *
+     * The rudder is negated. A positive rotation about the local +Y axis swings the
+     * nose to the left, while the control mapping promises that `yaw: 1` is a turn to
+     * the right — measured, not assumed: with the sign the other way, holding E turned
+     * the aircraft the wrong way.
+     */
     _euler.set(
       clamp(input.pitch ?? 0, -1, 1) * FLIGHT.pitchRate * agility * dt,
-      clamp(input.yaw ?? 0, -1, 1) * FLIGHT.yawRate * agility * dt,
+      -clamp(input.yaw ?? 0, -1, 1) * FLIGHT.yawRate * agility * dt,
       -clamp(input.roll ?? 0, -1, 1) * FLIGHT.rollRate * agility * dt,
       'XYZ',
     );
