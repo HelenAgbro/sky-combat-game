@@ -85,6 +85,8 @@ async function boot() {
         if (game) game.demo = enabled;
       },
       hideMenu: () => menu?.hide(),
+      /** Release the renderer and every generated texture. Used by the acceptance check. */
+      dispose: () => game?.dispose(),
     };
   } catch (error) {
     console.error('[SkyCombat] could not start', error);
