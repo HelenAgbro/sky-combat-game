@@ -189,6 +189,108 @@ async function main() {
     if (!failure.loadingHidden) problems.push('the loading screen stayed over the failure panel');
     await noGl.close();
 
+    // ----------------------------------------------------------------- judder
+    /*
+     * The aircraft is simulated on a fixed 60 Hz step. If its rendered transform is
+     * not interpolated between steps, a display that refreshes faster than 60 Hz shows
+     * the jet holding one position for several frames and then jumping — which reads as
+     * a shiver or a ghosted, doubled aircraft while the background slides smoothly.
+     *
+     * The frame-rate limit is lifted for this check so the mismatch is unmistakable:
+     * at several hundred frames a second, an un-interpolated aircraft should stand
+     * still for most frames and lurch on the rest.
+     */
+    console.log('\n5. Is the aircraft smooth on a display faster than the 60 Hz simulation?');
+    const fast = await chromium.launch({
+      channel: 'chrome',
+      args: [
+        '--ignore-gpu-blocklist',
+        '--use-angle=metal',
+        '--disable-frame-rate-limit',
+        '--disable-gpu-vsync',
+      ],
+    });
+    const judderPage = await fast.newPage({ viewport: { width: 1024, height: 640 } });
+    await judderPage.route('https://start.ng/**', (route) => route.abort());
+    await judderPage.goto(`${base}/`, { waitUntil: 'load' });
+    await judderPage.waitForFunction(() => window.__sky?.ready, null, { timeout: 60000 });
+    await judderPage.click('[data-action="start"]');
+    await judderPage.waitForTimeout(1200);
+
+    const motion = await judderPage.evaluate(
+      () =>
+        new Promise((resolve) => {
+          const game = window.__sky.game;
+          const frames = [];
+          let previous = null;
+          let previousTime = 0;
+
+          function tick(now) {
+            const position = game.aircraft.object3D.position;
+            const dt = previousTime ? Math.min(0.25, (now - previousTime) / 1000) : 0;
+
+            if (previous && dt > 0) {
+              frames.push({
+                dt,
+                moved: Math.hypot(
+                  position.x - previous.x,
+                  position.y - previous.y,
+                  position.z - previous.z,
+                ),
+                speed: game.aircraft.controller.speed,
+              });
+            }
+
+            previous = { x: position.x, y: position.y, z: position.z };
+            previousTime = now;
+
+            if (frames.length < 150) requestAnimationFrame(tick);
+            else resolve(frames);
+          }
+          requestAnimationFrame(tick);
+        }),
+    );
+
+    /*
+     * Compare what each frame actually moved with what it should have moved for its
+     * own duration. This is cadence-independent: it does not care how many times the
+     * display refreshed per simulation step, only whether the rendered position
+     * tracks time. A frame that moved nothing while time passed is a stall.
+     */
+    let stalled = 0;
+    let ratios = 0;
+    for (const frame of motion) {
+      const expected = frame.speed * frame.dt;
+      if (expected < 0.002) continue;
+      ratios += 1;
+      if (frame.moved < expected * 0.45) stalled += 1;
+    }
+
+    const stalledFraction = ratios === 0 ? 0 : stalled / ratios;
+    const meanRatio =
+      ratios === 0
+        ? 0
+        : motion.reduce((sum, frame) => {
+            const expected = frame.speed * frame.dt;
+            return sum + (expected < 0.002 ? 0 : frame.moved / expected);
+          }, 0) / ratios;
+
+    console.log(
+      `   ${motion.length} rendered frames measured against the 60 Hz simulation` +
+        `  mean move/expected ${meanRatio.toFixed(2)} (1.00 is perfect)`,
+    );
+    console.log(
+      `   frames that moved less than half of what their own duration required: ` +
+        `${(stalledFraction * 100).toFixed(0)}%`,
+    );
+    if (stalledFraction > 0.15) {
+      problems.push(
+        `the aircraft stalls on ${(stalledFraction * 100).toFixed(0)}% of frames: the rendered ` +
+          'transform is not interpolated between simulation steps',
+      );
+    }
+    await fast.close();
+
     // ---------------------------------------------------------------- teardown
     console.log('\n4. Does renderer cleanup run cleanly?');
     const teardown = await browser.newPage({ viewport: { width: 800, height: 600 } });

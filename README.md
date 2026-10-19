@@ -46,7 +46,7 @@ the result.
 ```bash
 npm run test:unit         # pure logic: flight model, state machine, quality tiers, assets, data
 npm run smoke             # opens dist/ in headless Chrome, flies, screenshots, fails on errors
-npm run test:acceptance   # framing at every aspect ratio, resize, WebGL failure, cleanup
+npm run test:acceptance   # framing at every aspect ratio, resize, WebGL failure, smoothness, cleanup
 npm test                  # all three
 ```
 
@@ -54,6 +54,12 @@ npm test                  # all three
 on screen at phone, tablet, desktop and ultrawide sizes, sampling across a full weave so
 every bank angle is covered. It caught the wingtips leaving the frame on a phone while
 the camera offset was a fixed distance.
+
+It also measures the aircraft's smoothness frame by frame, with the frame-rate limit
+lifted, and compares how far the jet moved with how far its own frame duration required.
+That check caught a shiver that was very visible on a fast display: the simulation runs
+at a fixed 60 Hz, and without interpolating between steps the jet stood still for 92% of
+rendered frames and then jumped.
 
 The smoke test writes `menu.png`, `flight.png`, `aircraft.png` and `console.log` to
 `test-results/`, which is useful for reviewing a visual change without launching a
