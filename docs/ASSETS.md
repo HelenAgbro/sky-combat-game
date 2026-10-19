@@ -23,7 +23,13 @@ AircraftFactory.create(id)
   └─ 3. if a payload exists but fails to parse: warn, fall back to 2, never crash
 ```
 
-## Path A — the airframe is built in code (what ships today)
+## Path A — the airframe is built in code (temporary, what ships today)
+
+> **This is temporary artwork.** No licensed aircraft model is available yet, and
+> start.ng cannot serve `.glb`/`.gltf` files in any case. The airframes below are
+> complete, fully-modelled shapes rather than placeholder primitives, but they stand
+> in for real artwork and the main menu labels them as temporary. Replacing them with
+> path B below requires no code changes.
 
 Every aircraft in `src/data/aircraft.js` is described by numbers, and
 `src/assets/models/Fighter.js` turns those numbers into a real mesh:

@@ -9,6 +9,12 @@ the interface are in place and the project builds, tests and publishes. Player f
 controls, enemies, weapons, the hangar, the shop and the start.ng integration are
 Stages 3–9 — see [Stages](#stages).
 
+> **The aircraft is temporary artwork.** No licensed model is available yet, and
+> start.ng cannot serve `.glb`/`.gltf` files anyway, so the airframes are generated in
+> code — complete, fully-modelled shapes rather than placeholder primitives, but still
+> a stand-in. The main menu labels them as temporary. A licensed model drops in with
+> no code changes: see [docs/ASSETS.md](docs/ASSETS.md).
+
 ---
 
 ## Requirements
@@ -38,10 +44,16 @@ the result.
 ## Testing
 
 ```bash
-npm run test:unit    # pure logic: flight model, state machine, quality tiers, assets, data
-npm run smoke        # opens dist/ in headless Chrome, flies, screenshots, fails on errors
-npm test             # both
+npm run test:unit         # pure logic: flight model, state machine, quality tiers, assets, data
+npm run smoke             # opens dist/ in headless Chrome, flies, screenshots, fails on errors
+npm run test:acceptance   # framing at every aspect ratio, resize, WebGL failure, cleanup
+npm test                  # all three
 ```
+
+`test:acceptance` is worth knowing about: it measures where the aircraft actually lands
+on screen at phone, tablet, desktop and ultrawide sizes, sampling across a full weave so
+every bank angle is covered. It caught the wingtips leaving the frame on a phone while
+the camera offset was a fixed distance.
 
 The smoke test writes `menu.png`, `flight.png`, `aircraft.png` and `console.log` to
 `test-results/`, which is useful for reviewing a visual change without launching a

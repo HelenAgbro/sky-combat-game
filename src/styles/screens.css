@@ -129,6 +129,11 @@
   letter-spacing: 0.02em;
 }
 
+/* The airframe is generated in code, which is temporary: say so plainly. */
+.aircraft-line.is-temporary {
+  color: #e2b76a;
+}
+
 /* -------------------------------------------------------------- perf meter */
 
 .perf {

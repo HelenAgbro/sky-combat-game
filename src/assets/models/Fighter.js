@@ -1,11 +1,19 @@
 /**
  * Sky Combat — procedural fighter airframe.
  *
- * The aircraft is a real, fully-modelled shape: a lofted fuselage with a canopy,
- * intake duct, swept airfoil wings, stabilisers, fins, nozzles, pylons and
- * wingtip missiles. It is described entirely by the `shape` block in
- * `data/aircraft.js`, so the four aircraft differ by configuration and share one
- * builder. See docs/ASSETS.md for why the game does not load a `.glb` file.
+ * TEMPORARY ARTWORK. This airframe is generated in code because no licensed
+ * aircraft model is available yet, and start.ng cannot serve `.glb`/`.gltf` files
+ * anyway (see docs/ASSETS.md). It is a complete, fully-modelled shape — a lofted
+ * fuselage with a canopy, intake duct, swept airfoil wings, stabilisers, fins,
+ * nozzles, pylons and wingtip missiles — but it stands in for real artwork, and
+ * the game says so on the menu.
+ *
+ * To replace it with a licensed model: put the `.glb` in `assets/`, run
+ * `npm run models`, and `AircraftFactory` will prefer it automatically, falling
+ * back to this airframe if the payload is missing or fails to parse.
+ *
+ * The shape is described entirely by the `shape` block in `data/aircraft.js`, so
+ * the four aircraft differ by configuration and share this one builder.
  */
 import { Group, Mesh } from 'three';
 import { airfoilRing, loftRings, mirrorX, scaleRing, superellipseRing } from '../loft.js';

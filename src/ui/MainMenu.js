@@ -55,8 +55,11 @@ export class MainMenu {
   /** Which aircraft is on screen, and whether it came from code or a packed model. */
   setAircraft(name, source) {
     const origin =
-      source === 'packed' ? 'licensed model, packed for start.ng' : 'airframe generated in code';
+      source === 'packed'
+        ? 'licensed model, packed for start.ng'
+        : 'TEMPORARY airframe built in code — no licensed model available yet';
     this.#aircraftLine.textContent = `${name} · ${origin}`;
+    this.#aircraftLine.classList.toggle('is-temporary', source !== 'packed');
   }
 
   get element() {
