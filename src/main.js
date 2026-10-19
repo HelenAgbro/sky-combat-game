@@ -17,6 +17,7 @@ import { Loading } from './ui/Loading.js';
 import { MainMenu } from './ui/MainMenu.js';
 import { PauseScreen } from './ui/PauseScreen.js';
 import { PerfReadout } from './ui/PerfReadout.js';
+import { ResultsScreen } from './ui/ResultsScreen.js';
 import { TouchControls, shouldShowTouchControls } from './ui/TouchControls.js';
 
 const canvas = document.getElementById('viewport');
@@ -34,21 +35,25 @@ let game = null;
 let menu = null;
 let hud = null;
 let pauseScreen = null;
+let results = null;
 let touch = null;
 
 /** The single place that decides what the player can see. */
 function applyScreens(state) {
   const flying = state === STATES.FLYING;
   const paused = state === STATES.PAUSED;
+  const finished = state === STATES.RESULTS;
 
-  if (flying || paused) menu?.hide();
+  if (flying || paused || finished) menu?.hide();
   else menu?.show();
 
-  if (flying) hud?.show();
+  if (flying || paused) hud?.show();
   else hud?.hide();
 
   if (paused) pauseScreen?.show();
   else pauseScreen?.hide();
+
+  if (!finished) results?.hide();
 
   // The touch controls stay up while paused: their pause button is how a touch
   // player gets going again.
@@ -117,6 +122,10 @@ async function boot() {
       },
       onMenu: () => game.toMenu(),
     });
+    results = new ResultsScreen(ui, {
+      onRestart: () => game.start(),
+      onMenu: () => game.toMenu(),
+    });
 
     if (wantsTouch) createTouchControls();
     else watchForFirstTouch();
@@ -128,6 +137,11 @@ async function boot() {
       perf.update(telemetry);
       hud.update(telemetry);
     });
+
+    // The end of a run. `Game` emits this once, and the summary is filled from the same
+    // telemetry the HUD was reading a frame earlier.
+    game.on('destroyed', (telemetry) => results.show(telemetry));
+
     game.state.on(applyScreens);
     applyScreens(game.state.current);
 
@@ -160,6 +174,8 @@ async function boot() {
         if (game) game.demo = enabled;
       },
       hideMenu: () => menu?.hide(),
+      /** Move to another scenery zone. See docs/SCENERY.md. */
+      setZone: (id, options) => game?.setZone(id, options),
       /** Release the renderer, the input listeners and every generated texture. */
       dispose: () => {
         game?.dispose();
@@ -167,6 +183,7 @@ async function boot() {
         touch?.dispose();
         hud?.dispose();
         pauseScreen?.dispose();
+        results?.dispose();
         menu?.dispose();
         perf.dispose();
       },

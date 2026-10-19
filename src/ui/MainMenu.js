@@ -19,7 +19,7 @@ export class MainMenu {
     this.#element.innerHTML = `
       <div class="menu-inner">
         <div class="menu-copy">
-          <p class="eyebrow">start.ng · stage 4 prototype</p>
+          <p class="eyebrow">start.ng · stage 6 prototype</p>
           <h1 class="wordmark">SKY <span>COMBAT</span></h1>
           <p class="tagline">Fly, fight and chase the greatest distance.</p>
           <div class="menu-actions">
@@ -28,8 +28,9 @@ export class MainMenu {
           </div>
           <p class="menu-status"></p>
           <p class="menu-note muted">
-            This build has the world, the atmosphere, the aircraft and the flight controls.
-            Enemies, weapons and the start.ng leaderboard follow in later stages.
+            Fly, hold <b>Space</b> to fire, and watch the hull. Enemies and hazards arrive on
+            their own. Coins, power-ups, the hangar and the start.ng leaderboard follow in
+            later stages.
           </p>
         </div>
         <p class="aircraft-line muted"></p>

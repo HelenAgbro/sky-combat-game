@@ -24,8 +24,12 @@ import { chromium } from 'playwright-core';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { serve } from '../tools/serve.mjs';
+import { COMBAT } from '../src/game/config.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+/** One hazard's worth of damage, for the "one collision, one hit" check. */
+const OBSTACLE_DAMAGE = COMBAT.obstacles.damage;
 
 const VIEWPORTS = [
   { name: 'desktop 16:9', width: 1280, height: 720 },
@@ -613,6 +617,9 @@ async function main() {
           programs: game.renderer.info.programs?.length ?? 0,
           hasClouds: Boolean(game.scene.getObjectByName('clouds')),
           hasTerrain: Boolean(game.scene.getObjectByName('terrain')),
+          hasRidge: Boolean(game.scene.getObjectByName('ridge')),
+          hasCombat: Boolean(game.scene.getObjectByName('combat')),
+          zone: game.telemetry().zone,
           ...game.telemetry(),
         };
       });
@@ -663,6 +670,8 @@ async function main() {
 
     if (!before.hasClouds) problems.push('the cloud layer is not in the scene');
     if (!before.hasTerrain) problems.push('the terrain is not in the scene');
+    if (!before.hasRidge) problems.push('the horizon band is not in the scene');
+    if (!before.hasCombat) problems.push('the combat systems are not in the scene');
     if (!before.controlSurfaces) problems.push('the airframe has no moving control surfaces');
     if (after.clouds <= 0) problems.push('the cloud field is empty');
     if (after.islands <= 0) problems.push('no land is being placed');
@@ -694,8 +703,216 @@ async function main() {
 
     await budget.close();
 
+    /*
+     * Stage 5's architecture: one call moves the whole world to another zone, and every
+     * module cross-fades together. Only the coastal zone is polished, but the machinery
+     * has to work for the rest of them to be data.
+     */
+    console.log('\n9. Does a scenery zone transition run end to end?');
+    const zones = await browser.newPage({ viewport: { width: 1024, height: 640 } });
+    await zones.route('https://start.ng/**', (route) => route.abort());
+    await zones.goto(`${base}/`, { waitUntil: 'load' });
+    await zones.waitForFunction(() => window.__sky?.ready, null, { timeout: 60000 });
+    await zones.click('[data-action="start"]');
+    await zones.waitForTimeout(900);
+
+    const beforeZone = await zones.evaluate(() => {
+      const game = window.__sky.game;
+      return {
+        zone: game.telemetry().zone,
+        zenith: game.sky.mesh.material.uniforms.uZenith.value.getHexString(),
+        fogNear: game.scene.fog.near,
+        exposure: game.renderer.toneMappingExposure,
+      };
+    });
+
+    const started = await zones.evaluate(() => window.__sky.setZone('storm', { seconds: 2 }));
+    await zones.waitForTimeout(500);
+    const midway = await zones.evaluate(() => ({
+      transitioning: window.__sky.game.zones.transitioning,
+      progress: window.__sky.game.zones.progress,
+      zenith: window.__sky.game.sky.mesh.material.uniforms.uZenith.value.getHexString(),
+    }));
+
+    await zones.waitForTimeout(2200);
+    const afterZone = await zones.evaluate(() => {
+      const game = window.__sky.game;
+      return {
+        zone: game.telemetry().zone,
+        zenith: game.sky.mesh.material.uniforms.uZenith.value.getHexString(),
+        fogNear: game.scene.fog.near,
+        exposure: game.renderer.toneMappingExposure,
+        transitioning: game.zones.transitioning,
+        swaps: game.zones.swaps,
+      };
+    });
+
+    // And back again, to prove the transition is not a one-way trip.
+    await zones.evaluate(() => window.__sky.setZone('coastal', { seconds: 1 }));
+    await zones.waitForTimeout(1400);
+    const returned = await zones.evaluate(() => window.__sky.telemetry().zone);
+
+    console.log(
+      `   ${beforeZone.zone} -> storm: midway progress ${midway.progress.toFixed(2)}` +
+        ` (transitioning ${midway.transitioning}), arrived as "${afterZone.zone}"`,
+    );
+    console.log(
+      `   sky zenith ${beforeZone.zenith} -> ${afterZone.zenith} -> back as "${returned}"` +
+        `   fog near ${beforeZone.fogNear} -> ${afterZone.fogNear}` +
+        `   exposure ${beforeZone.exposure.toFixed(2)} -> ${afterZone.exposure.toFixed(2)}`,
+    );
+
+    if (!started) problems.push('the zone transition refused to start');
+    if (!midway.transitioning) problems.push('the transition did not report itself as running');
+    if (!(midway.progress > 0 && midway.progress < 1)) {
+      problems.push(`the transition jumped rather than blending (progress ${midway.progress})`);
+    }
+    if (midway.zenith === beforeZone.zenith) problems.push('the sky did not change during the transition');
+    if (afterZone.zone !== 'storm') problems.push(`the transition did not arrive (${afterZone.zone})`);
+    if (afterZone.zenith === beforeZone.zenith) problems.push('the sky is unchanged at the destination');
+    if (afterZone.fogNear === beforeZone.fogNear) problems.push('the fog did not change with the zone');
+    if (afterZone.transitioning) problems.push('the transition never finished');
+    if (afterZone.swaps < 1) problems.push('the scenery kind never swapped');
+    if (returned !== 'coastal') problems.push(`could not transition back (${returned})`);
+
+    await zones.close();
+
+    /*
+     * The fight. Everything here is driven through the real systems — a real enemy spawned
+     * by the spawner, real shots from the gun, a real collision — rather than by calling
+     * the collision code directly, so what is checked is the game rather than the maths
+     * (which the unit tests already cover).
+     */
+    console.log('\n10. Does the fight work: firing, hits, kills and collisions?');
+    const fight = await browser.newPage({ viewport: { width: 1024, height: 640 } });
+    await fight.route('https://start.ng/**', (route) => route.abort());
+    await fight.goto(`${base}/`, { waitUntil: 'load' });
+    await fight.waitForFunction(() => window.__sky?.ready, null, { timeout: 60000 });
+    await fight.click('[data-action="start"]');
+    await fight.waitForTimeout(1000);
+
+    // Enemies arrive on their own, without being asked.
+    const spawnedOnTheirOwn = await fight.evaluate(
+      () =>
+        new Promise((resolve) => {
+          const game = window.__sky.game;
+          const started = performance.now();
+          const check = () => {
+            if (game.combat.telemetry().enemies > 0) resolve(true);
+            else if (performance.now() - started > 12000) resolve(false);
+            else requestAnimationFrame(check);
+          };
+          requestAnimationFrame(check);
+        }),
+    );
+
+    // Firing, and a shot that lands. A stationary enemy is placed in the gun's line so the
+    // result is deterministic rather than a matter of luck.
+    const aimed = await fight.evaluate(() => {
+      const game = window.__sky.game;
+      const combat = game.combat;
+      const player = game.aircraft.controller;
+
+      // Clear the natural traffic, so nothing else can be hit or shoot back.
+      combat.enemies.releaseAll();
+
+      const enemy = combat.enemies.spawn(player);
+      if (!enemy) return { spawned: false, before: combat.telemetry() };
+
+      enemy.position.copy(player.position).addScaledVector(player.forward, 500);
+      enemy.speed = 0;
+      enemy.pattern = 'patrol';
+      enemy.fireCooldown = 1e6;
+
+      return { spawned: true, before: combat.telemetry() };
+    });
+
+    await fight.keyboard.down('Space');
+    await fight.waitForTimeout(2600);
+    await fight.keyboard.up('Space');
+
+    const fought = await fight.evaluate(() => window.__sky.game.combat.telemetry());
+
+    // And a hazard, flown into deliberately.
+    const hazard = await fight.evaluate(() => {
+      const game = window.__sky.game;
+      const player = game.aircraft.controller;
+      game.combat.enemies.releaseAll();
+      const before = game.combat.telemetry().hull;
+
+      const obstacle = game.combat.obstacles.spawn(player);
+      if (!obstacle) return { spawned: false, before };
+      obstacle.position.copy(player.position);
+      obstacle.anchorY = obstacle.position.y;
+      return { spawned: true, before };
+    });
+
+    await fight.waitForTimeout(700);
+    const afterHazard = await fight.evaluate(() => window.__sky.game.combat.telemetry());
+
+    // Responsiveness while the fight is running.
+    const fpsBefore = await fight.evaluate(() => window.__sky.game.frameCount);
+    await fight.waitForTimeout(2000);
+    const fpsAfter = await fight.evaluate(() => window.__sky.game.frameCount);
+    const fightFps = (fpsAfter - fpsBefore) / 2;
+
+    // Everything given back once it is no longer needed.
+    await fight.waitForTimeout(2000);
+    const settled = await fight.evaluate(() => window.__sky.game.combat.telemetry());
+
+    console.log(
+      `   enemies arrive on their own: ${spawnedOnTheirOwn}` +
+        `   aimed shot: ${aimed.spawned ? 'placed' : 'NOT PLACED'}`,
+    );
+    console.log(
+      `   shots fired ${aimed.before.shotsFired} -> ${fought.shotsFired}` +
+        `   hits ${aimed.before.shotsHit} -> ${fought.shotsHit}` +
+        `   kills ${aimed.before.kills} -> ${fought.kills}   score ${fought.score}`,
+    );
+    console.log(
+      `   hazard: ${hazard.spawned ? 'placed on the aircraft' : 'NOT PLACED'}` +
+        `   hull ${hazard.before} -> ${afterHazard.hull}`,
+    );
+    console.log(
+      `   frame rate during the fight: ${fightFps.toFixed(0)} fps` +
+        `   shots still in the air: ${settled.playerShots}` +
+        `   enemies ${settled.enemies}/${settled.enemyCapacity}` +
+        `   hazards ${settled.obstacles}/${settled.obstacleCapacity}`,
+    );
+
+    if (!spawnedOnTheirOwn) problems.push('no enemy appeared on its own within twelve seconds');
+    if (!aimed.spawned) problems.push('could not place an enemy to shoot at');
+
+    if (fought.shotsFired <= aimed.before.shotsFired) problems.push('holding fire did not fire the gun');
+    if (fought.shotsHit <= aimed.before.shotsHit) problems.push('no shot ever hit the target ahead');
+    if (fought.kills <= aimed.before.kills) problems.push('the target was hit but never destroyed');
+
+    // One enemy, one reward: a burst that lands many hits must not score more than once.
+    const awarded = fought.kills - aimed.before.kills;
+    if (awarded > 1) problems.push(`${awarded} kills were awarded for a single enemy`);
+
+    if (!hazard.spawned) problems.push('could not place a hazard');
+    else {
+      const damage = hazard.before - afterHazard.hull;
+      if (damage <= 0) problems.push('flying into a hazard did no damage');
+      // One collision, one hit: the grace window and the burst-on-contact rule mean the
+      // hull must fall by about one hazard's worth, not by several.
+      else if (damage > OBSTACLE_DAMAGE * 1.5) {
+        problems.push(`one hazard took ${damage} off the hull, which is more than one collision's worth`);
+      }
+    }
+
+    if (fightFps < 30) problems.push(`the game ran at ${fightFps.toFixed(0)} fps during the fight`);
+    if (settled.playerShots !== 0) {
+      problems.push(`${settled.playerShots} shots were never recycled after the firing stopped`);
+    }
+    if (settled.enemies > settled.enemyCapacity) problems.push('more enemies alive than the pool holds');
+    if (settled.obstacles > settled.obstacleCapacity) problems.push('more hazards alive than the pool holds');
+
+    await fight.close();
+
     // ---------------------------------------------------------------- teardown
-    console.log('\n9. Does renderer cleanup run cleanly?');
+    console.log('\n11. Does renderer cleanup run cleanly?');
     const teardown = await browser.newPage({ viewport: { width: 800, height: 600 } });
     const teardownErrors = [];
     teardown.on('pageerror', (error) => teardownErrors.push(error.message));

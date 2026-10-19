@@ -199,13 +199,17 @@ third-party content of any kind in this repository.
 
 | Asset | Source | Licence |
 | --- | --- | --- |
-| All four aircraft (`falcon`, `viper`, `titan`, `phantom`) | Generated in code by this project, `src/assets/models/Fighter.js` | MIT, same as this repository |
+| All four player aircraft (`falcon`, `viper`, `titan`, `phantom`) | Generated in code by this project, `src/assets/models/Fighter.js` | MIT, same as this repository |
+| The three enemy aircraft (`wasp`, `kite`, `ember`) | Generated in code by this project, from `src/data/enemies.js` through the same builder | MIT, same as this repository |
 | Airframe paint, roughness and normal maps | Generated at runtime by this project, `src/assets/textures.js` | MIT, same as this repository |
 | Cloud and cirrus cards | Generated at runtime by this project, `src/assets/textures.js` | MIT, same as this repository |
-| Island geometry | Generated in code by this project, `src/scene/Terrain.js` | MIT, same as this repository |
+| Horizon ridge silhouettes | Generated at runtime by this project, `src/assets/textures.js` | MIT, same as this repository |
+| Island and mountain geometry | Generated in code by this project, `src/scene/Terrain.js` | MIT, same as this repository |
+| Hazard balloons | Generated in code by this project, `src/combat/Obstacles.js` | MIT, same as this repository |
 | Sea swell and ripple normal maps | Generated at runtime by this project, `src/assets/textures.js` | MIT, same as this repository |
 | Sky, sun and environment map | Generated at runtime by this project, `src/scene/Sky.js` | MIT, same as this repository |
 | Engine glow, afterburner and shock diamonds | Generated in code by this project, `src/scene/Effects.js` | MIT, same as this repository |
+| Hit flashes and destruction puffs | Generated in code by this project, `src/combat/Impacts.js` | MIT, same as this repository |
 | Cover image | Rendered from the game itself by `tools/cover.mjs` | MIT, same as this repository |
 
 If a licensed model is added under `assets/`, record it in this table with its author,
@@ -227,3 +231,6 @@ art: it is never copied into `dist/` and never served.
 - **Cloud shadows on the water.** Would need the cloud field to cast into the shadow map.
   Deliberately skipped: one shadow pass, not two.
 - **Terrain collision.** See above — the land is scenery, not level geometry.
+- **A licensed model of anything.** The enemy aircraft are generated from the same builder as
+  the player's, so they are as temporary as it is; the requirements a replacement would have
+  to meet are the same table above, and a replacement enemy would need the same treatment.

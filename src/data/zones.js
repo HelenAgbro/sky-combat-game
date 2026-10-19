@@ -19,6 +19,9 @@ export const ZONES = [
     ambient: { color: '#9dc4e2', intensity: 0.62 },
     clouds: { color: '#ffffff', opacity: 0.92, cirrus: '#ffffff', cirrusOpacity: 0.5, coverage: 1 },
     terrain: { color: '#8fa87a', density: 0.5, seedOffset: 0 },
+    /** Which scenery kinds this zone is built from. See scene/scenery.js. */
+    scenery: { terrain: 'islands' },
+    ridge: { kind: 'coast', color: '#7d93a8', opacity: 0.5 },
     exposure: 0.95,
   },
   {
@@ -32,6 +35,8 @@ export const ZONES = [
     ambient: { color: '#a9c3d8', intensity: 0.55 },
     clouds: { color: '#f4f8fd', opacity: 0.95, cirrus: '#ffffff', cirrusOpacity: 0.55, coverage: 0.9 },
     terrain: { color: '#9aa3ad', density: 0.62, seedOffset: 17 },
+    scenery: { terrain: 'mountains' },
+    ridge: { kind: 'peaks', color: '#8f9aa6', opacity: 0.62 },
     exposure: 0.96,
   },
   {
@@ -45,6 +50,8 @@ export const ZONES = [
     ambient: { color: '#e0c49a', intensity: 0.7 },
     clouds: { color: '#fdf6e6', opacity: 0.85, cirrus: '#fff2d8', cirrusOpacity: 0.32, coverage: 0.6 },
     terrain: { color: '#c8a76a', density: 0.4, seedOffset: 33 },
+    scenery: { terrain: 'islands' },
+    ridge: { kind: 'dunes', color: '#d8c39a', opacity: 0.4 },
     exposure: 0.98,
   },
   {
@@ -58,6 +65,8 @@ export const ZONES = [
     ambient: { color: '#6f8290', intensity: 0.75 },
     clouds: { color: '#78838f', opacity: 0.98, cirrus: '#8d99a6', cirrusOpacity: 0.75, coverage: 1 },
     terrain: { color: '#5c6670', density: 0.55, seedOffset: 51 },
+    scenery: { terrain: 'islands' },
+    ridge: { kind: 'peaks', color: '#4d5763', opacity: 0.7 },
     exposure: 0.95,
   },
   {
@@ -71,6 +80,8 @@ export const ZONES = [
     ambient: { color: '#b9846a', intensity: 0.5 },
     clouds: { color: '#ffd9b0', opacity: 0.9, cirrus: '#ffc9a0', cirrusOpacity: 0.6, coverage: 0.85 },
     terrain: { color: '#8a7a6a', density: 0.45, seedOffset: 67 },
+    scenery: { terrain: 'islands' },
+    ridge: { kind: 'coast', color: '#b07a5e', opacity: 0.55 },
     exposure: 0.96,
   },
 ];

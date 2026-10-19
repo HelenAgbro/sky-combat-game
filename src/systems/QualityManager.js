@@ -34,8 +34,15 @@ export const PRESETS = Object.freeze({
     clouds: 10,
     /** Island meshes the terrain pool can show at once. */
     islands: 6,
+    /** Enemy aircraft alive at once, and the pool they are drawn from. */
+    enemies: 3,
+    /** Hazard balloons alive at once, and the pool they are drawn from. */
+    obstacles: 4,
+    /** Impact flashes alive at once. One instanced draw call. */
+    impacts: 16,
     paintTextureSize: 512,
     cloudTextureSize: 128,
+    ridgeTextureSize: 256,
     renderScaleRange: [0.6, 1],
   },
   medium: {
@@ -49,8 +56,12 @@ export const PRESETS = Object.freeze({
     waterDetail: true,
     clouds: 20,
     islands: 10,
+    enemies: 5,
+    obstacles: 8,
+    impacts: 24,
     paintTextureSize: 1024,
     cloudTextureSize: 256,
+    ridgeTextureSize: 512,
     renderScaleRange: [0.7, 1],
   },
   high: {
@@ -64,8 +75,12 @@ export const PRESETS = Object.freeze({
     waterDetail: true,
     clouds: 30,
     islands: 14,
+    enemies: 7,
+    obstacles: 12,
+    impacts: 32,
     paintTextureSize: 1024,
     cloudTextureSize: 256,
+    ridgeTextureSize: 512,
     renderScaleRange: [0.85, 1],
   },
 });

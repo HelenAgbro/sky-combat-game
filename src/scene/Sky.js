@@ -126,8 +126,16 @@ export class Sky {
     return this.#envMap;
   }
 
-  /** Re-colour the sky for a zone and rebuild the environment map. */
-  setZone(zone) {
+  /**
+   * Re-colour the sky for a zone and rebuild the environment map.
+   *
+   * @param {object} zone
+   * @param {{rebuild?: boolean}} [options] `rebuild: false` re-colours the dome without
+   *   regenerating the environment map. A zone transition runs this every frame, and a
+   *   PMREM render per frame would cost more than the whole scene; the director rebuilds
+   *   it a handful of times across the transition instead.
+   */
+  setZone(zone, { rebuild = true } = {}) {
     this.#zone = zone;
     const uniforms = this.#material.uniforms;
     uniforms.uZenith.value.set(zone.sky.zenith);
@@ -146,7 +154,7 @@ export class Sky {
       .normalize();
     uniforms.uSunDirection.value.copy(this.#sunDirection);
 
-    this.#buildEnvironment();
+    if (rebuild) this.#buildEnvironment();
   }
 
   /** Render the dome into a pre-filtered environment map for reflections. */

@@ -122,3 +122,116 @@ export const DEMO_FLIGHT = {
   altitudeHold: 420,
   altitudeGain: 0.0016,
 };
+
+/**
+ * Combat: the gun, the enemies, the hazards and the difficulty ramp.
+ *
+ * Everything here is a number rather than a rule, so the fight can be tuned without
+ * touching the systems that run it. Fictional arcade combat only: no real-world
+ * tactics, no real aircraft.
+ */
+export const COMBAT = {
+  /** The player's gun. */
+  gun: {
+    /** Seconds between shots. */
+    cooldown: 0.115,
+    /** Muzzle velocity, added to the aircraft's own. */
+    speed: 640,
+    /** Seconds before an unfired shot expires. */
+    lifespan: 1.5,
+    damage: 34,
+    /** Aim scatter, in radians. Small: this is a gun, not a spray. */
+    spread: 0.0045,
+    capacity: 64,
+  },
+
+  /** Enemy guns. Slower, weaker and much less accurate, so a fight is survivable. */
+  enemyGun: {
+    cooldown: 1.5,
+    speed: 400,
+    lifespan: 2.2,
+    damage: 7,
+    spread: 0.02,
+    capacity: 48,
+    /** Never fire from further away than this. */
+    maxRange: 1500,
+  },
+
+  /** Enemy aircraft. */
+  enemies: {
+    /** Ceiling on enemies alive at once, whatever the difficulty ramp says. */
+    hardCap: 7,
+    /** Seconds into a run before the first one appears. */
+    firstSpawn: 3.5,
+    minSpawnDistance: 750,
+    maxSpawnDistance: 1150,
+    /**
+     * How far off the player's flight path an enemy may appear, sideways and
+     * vertically. The minimum matters: nothing is ever spawned dead ahead at close
+     * range, so every enemy is avoidable.
+     */
+    minLateralOffset: 80,
+    maxLateralOffset: 340,
+    minVerticalOffset: 45,
+    maxVerticalOffset: 200,
+    /** Collision radius, in metres. Generous, so a near miss still counts as a hit. */
+    radius: 9,
+    /** Hull of one enemy. Two solid hits, or one long burst. */
+    integrity: 100,
+    /** What ramming one costs the player. */
+    ramDamage: 24,
+    /** Points a kill is worth. */
+    scorePerKill: 100,
+    /** Seconds between enemy shots at the start of a run, before the ramp. */
+    fireInterval: 3.2,
+  },
+
+  /** Environmental hazards: tethered balloons the player has to fly around. */
+  obstacles: {
+    /** Seconds into a run before the first one appears. */
+    firstSpawn: 6,
+    /** Seconds between placements. */
+    interval: 3.4,
+    minSpawnDistance: 1000,
+    maxSpawnDistance: 2800,
+    /** Nothing is ever placed dead ahead: a hazard you cannot see is not a hazard. */
+    minLateralOffset: 55,
+    maxLateralOffset: 460,
+    /**
+     * Altitude relative to the player at the moment of placement, as a signed band:
+     * hazards sit above and below the flight path, not only above it.
+     */
+    signedAltitude: true,
+    minAltitudeOffset: -140,
+    maxAltitudeOffset: 240,
+    /** Collision radius of the envelope, in metres. */
+    radius: 12,
+    damage: 34,
+    /** Seconds a hazard stays in the world before it is recycled. */
+    lifespan: 40,
+    /** Envelope radius at build time, before the per-instance scale. */
+    envelopeRadius: 9,
+  },
+
+  /** The player's hull. */
+  hull: {
+    max: 100,
+    /**
+     * Seconds of grace after a hit. Without it, flying through one hazard would chew
+     * the whole hull in a handful of frames and read as an instant, unexplained loss.
+     */
+    grace: 1.25,
+  },
+
+  /**
+   * The difficulty ramp: every value is interpolated from the first number to the
+   * second as the run goes on, over `rampSeconds`.
+   */
+  ramp: {
+    seconds: 150,
+    spawnInterval: [8, 2.8],
+    maxAlive: [2, 6],
+    speed: [0.8, 1.15],
+    fireRate: [0.4, 1],
+  },
+};

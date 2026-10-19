@@ -1,69 +1,125 @@
 /**
  * Sky Combat — the land.
  *
- * Islands, as low-poly radial heightfields, placed on the deterministic grid in
- * `scene/islandLayout.js` and drawn only near the aircraft. Their purpose is scale
- * and depth: without land the sea is an endless plane and the aircraft has no sense
- * of how fast or how high it is.
+ * Islands and ridges, as low-poly radial heightfields, placed on the deterministic grid
+ * in `scene/islandLayout.js` and drawn only near the aircraft. Their purpose is scale
+ * and depth: without land the sea is an endless plane and the aircraft has no sense of
+ * how fast or how high it is.
  *
- * Deliberately cheap: eight shared geometries, a fixed pool of meshes, no shadow
- * casting, no collision. The land sits well below the aircraft's normal altitude band
- * and is scenery, not level geometry — see docs/ASSETS.md for what that means.
+ * What the land *is* comes from a scenery kind (`scene/scenery.js`): height, footprint,
+ * how many summits, how jagged the outline, and the colour bands by height. A zone names
+ * a kind, so a new one is data rather than code.
+ *
+ * Deliberately cheap: a handful of shared geometries, a fixed pool of meshes, no shadow
+ * casting, no collision. The land is scenery, not level geometry — see docs/ASSETS.md.
  */
-import { Color, Group, Mesh, MeshStandardMaterial, BufferGeometry, Float32BufferAttribute, SRGBColorSpace } from 'three';
-import { createSeededRandom } from '../game/math.js';
+import {
+  BufferGeometry,
+  Color,
+  Float32BufferAttribute,
+  Group,
+  Mesh,
+  MeshStandardMaterial,
+  SRGBColorSpace,
+} from 'three';
+import { createSeededRandom, shortestAngle } from '../game/math.js';
 import { ISLAND_FIELD, cellOf, islandsAround } from './islandLayout.js';
+import { sceneryFor } from './scenery.js';
 
-/** How many distinct island shapes are built. They are reused across the whole world. */
+/** How many distinct terrain shapes are built. They are reused across the whole world. */
 const SHAPE_COUNT = 8;
 
-/** Colour bands by height fraction: sand, grass, rock, snow. */
-function bandColour(color, t) {
-  if (t < 0.05) return color.setRGB(0.87, 0.81, 0.65, SRGBColorSpace);
-  if (t < 0.32) return color.setRGB(0.35, 0.45, 0.29, SRGBColorSpace);
-  if (t < 0.7) return color.setRGB(0.45, 0.43, 0.38, SRGBColorSpace);
-  return color.setRGB(0.87, 0.89, 0.93, SRGBColorSpace);
+/** Pick a colour band by height fraction: beach, grass, rock, snow. */
+function bandColour(color, t, bands) {
+  for (const [upTo, r, g, b] of bands) {
+    if (t <= upTo) return color.setRGB(r, g, b, SRGBColorSpace);
+  }
+  // A kind with no bands — open water — leaves the colour alone rather than reading off
+  // the end of an empty list.
+  if (bands.length === 0) return color;
+  const last = bands[bands.length - 1];
+  return color.setRGB(last[1], last[2], last[3], SRGBColorSpace);
 }
 
 /**
- * One island: a dome of triangles with a wobbling outline, coloured by height.
+ * One landform: a heightfield of triangles with a wobbling outline, coloured by height.
  *
- * The rim is sunk a few metres below sea level so the waterline is a clean
- * intersection instead of two coplanar surfaces fighting over the same pixels.
+ * The rim is sunk a few metres below sea level so the waterline is a clean intersection
+ * instead of two coplanar surfaces fighting over the same pixels.
  *
  * Winding is chosen so every face points upward; `tests/assets.test.mjs` asserts it
  * rather than trusting it.
+ *
+ * @param {() => number} random deterministic source
+ * @param {object} kind from `scene/scenery.js`
  */
-export function buildIslandGeometry(random, { rings = 8, segments = 22, height = 190, radius = 620 } = {}) {
+export function buildTerrainGeometry(random, kind) {
+  const {
+    rings,
+    segments,
+    height,
+    radius,
+    fullness,
+    taper,
+    peaks,
+    peakSpread,
+    wobble,
+    squash,
+    peakScale,
+    sink,
+    bands,
+  } = kind;
+
   const positions = [];
   const colors = [];
   const indices = [];
   const color = new Color();
-
-  const phaseA = random() * Math.PI * 2;
-  const phaseB = random() * Math.PI * 2;
-  const squash = 0.82 + random() * 0.4;
-  const peak = 0.85 + random() * 0.3;
   const stride = segments + 1;
 
+  // Every random choice is made once, outside the sampling loop, so a shape is
+  // deterministic and the loop itself stays free of branching.
+  const phases = wobble.map(() => random() * Math.PI * 2);
+  const basePhase = random() * Math.PI * 2;
+  const stretch = squash[0] + random() * (squash[1] - squash[0]);
+  const summit = peakScale[0] + random() * (peakScale[1] - peakScale[0]);
+  const peakAngles = [];
+  for (let i = 0; i < peaks; i += 1) {
+    peakAngles.push(basePhase + (i / peaks) * Math.PI * 2 + (random() - 0.5) * 0.7);
+  }
+
   const sample = (t, angle) => {
-    const wobble =
-      1 + 0.26 * Math.sin(angle * 3 + phaseA) + 0.14 * Math.sin(angle * 5 + phaseB);
-    const dome = Math.cos((t * Math.PI) / 2) ** 1.5;
+    let edge = 1;
+    for (let i = 0; i < wobble.length; i += 1) {
+      edge += wobble[i][1] * Math.sin(angle * wobble[i][0] + phases[i]);
+    }
+
+    // One summit is a dome; several gathered around the rim make a ridge line, which is
+    // the difference between an island and a mountain range.
+    let ridge = 1;
+    if (peaks > 1) {
+      let nearest = 0;
+      for (const peakAngle of peakAngles) {
+        const distance = Math.abs(shortestAngle(peakAngle, angle));
+        nearest = Math.max(nearest, Math.exp(-((distance / peakSpread) ** 2)));
+      }
+      ridge = 0.5 + 0.5 * nearest;
+    }
+
+    const dome = Math.cos((t * Math.PI) / 2) ** fullness;
     // `t ** 8` only bites on the outermost ring, so just the shoreline sinks.
-    const y = height * dome * wobble * (1 - 0.3 * t) * peak - 8 * t ** 8;
-    const radial = radius * t * (1 + 0.2 * Math.sin(angle * 2 + phaseB));
-    return { x: Math.cos(angle) * radial, y, z: Math.sin(angle) * radial * squash };
+    const y = height * dome * edge * ridge * summit * (1 - taper * t) - sink * t ** 8;
+    const radial = radius * t * (1 + 0.2 * Math.sin(angle * 2 + basePhase));
+    return { x: Math.cos(angle) * radial, y, z: Math.sin(angle) * radial * stretch };
   };
 
   const push = (point) => {
     positions.push(point.x, point.y, point.z);
-    bandColour(color, Math.max(0, point.y) / height);
+    bandColour(color, Math.max(0, point.y) / height, bands);
     colors.push(color.r, color.g, color.b);
   };
 
   // The summit, then every ring out to the shore.
-  push({ x: 0, y: height * peak, z: 0 });
+  push({ x: 0, y: height * summit, z: 0 });
   for (let r = 1; r <= rings; r += 1) {
     for (let s = 0; s <= segments; s += 1) {
       push(sample(r / rings, (s / segments) * Math.PI * 2));
@@ -104,18 +160,14 @@ export class Terrain {
   #field;
   #cell = { cx: NaN, cz: NaN };
   #placed = 0;
+  /** Which terrain kind the shapes were built for. */
+  #terrainId = null;
 
   constructor(zone, preset) {
     this.#group = new Group();
     this.#group.name = 'terrain';
 
     const count = Math.max(0, preset.islands ?? 0);
-    const random = createSeededRandom(9137);
-    const shapes = Math.max(1, Math.min(SHAPE_COUNT, count));
-
-    // One set of shapes for the whole world: a cell reuses whichever shape its pool
-    // slot already holds, so flying around never builds or frees geometry.
-    for (let i = 0; i < shapes; i += 1) this.#shapes.push(buildIslandGeometry(random));
 
     this.#material = new MeshStandardMaterial({
       vertexColors: true,
@@ -125,9 +177,11 @@ export class Terrain {
       envMapIntensity: 0.55,
     });
 
+    this.#buildShapes(zone, count);
+
     for (let i = 0; i < count; i += 1) {
       const mesh = new Mesh(this.#shapes[i % this.#shapes.length], this.#material);
-      mesh.name = `island:${i}`;
+      mesh.name = `land:${i}`;
       // Static scenery: the transform is written once when a slot takes a cell, so
       // Three does not rebuild the matrix every frame.
       mesh.matrixAutoUpdate = false;
@@ -146,6 +200,26 @@ export class Terrain {
     this.setZone(zone);
   }
 
+  /**
+   * Build the shared shapes for the zone's terrain kind.
+   *
+   * One set of shapes serves the whole world: a cell reuses whichever shape its pool slot
+   * already holds, so flying around never builds or frees geometry. They are rebuilt only
+   * when the zone's kind actually changes, which happens at the midpoint of a transition.
+   */
+  #buildShapes(zone, count) {
+    const { terrain, terrainId } = sceneryFor(zone);
+    this.#terrainId = terrainId;
+
+    for (const shape of this.#shapes) shape.dispose();
+    this.#shapes.length = 0;
+    if (count === 0 || terrain.density === 0) return;
+
+    const random = createSeededRandom(9137);
+    const shapes = Math.max(1, Math.min(SHAPE_COUNT, count));
+    for (let i = 0; i < shapes; i += 1) this.#shapes.push(buildTerrainGeometry(random, terrain));
+  }
+
   get group() {
     return this.#group;
   }
@@ -160,15 +234,33 @@ export class Terrain {
     return this.#placed;
   }
 
-  /** Re-tint the land for a zone and re-read how dense the archipelago is. */
+  /** Re-tint the land for a zone, and rebuild it if the zone names a different kind. */
   setZone(zone) {
     const palette = zone.terrain ?? {};
     this.#material.color.set(palette.color ?? '#ffffff');
+
+    if (sceneryFor(zone).terrainId !== this.#terrainId) {
+      this.#buildShapes(zone, this.#pool.length);
+      // The pool's meshes are shared, so they have to be re-pointed at the new shapes.
+      const shapes = this.#shapes.length;
+      for (let i = 0; i < this.#pool.length; i += 1) {
+        if (shapes === 0) {
+          this.#pool[i].visible = false;
+        } else {
+          this.#pool[i].geometry = this.#shapes[i % shapes];
+        }
+      }
+    }
+
     this.#field = {
       ...ISLAND_FIELD,
       density: palette.density ?? ISLAND_FIELD.density,
       seed: ISLAND_FIELD.seed + (palette.seedOffset ?? 0),
     };
+
+    // Forget which cell we are in, so the next update re-places the whole pool.
+    this.#cell.cx = NaN;
+    this.#cell.cz = NaN;
   }
 
   /**

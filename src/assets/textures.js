@@ -556,6 +556,80 @@ export function createCirrusTexture({ size = 512, seed = 5, streaks = 110 } = {}
 }
 
 /**
+ * A distant ridge card: stacked mountain silhouettes for the horizon band.
+ *
+ * The layers are drawn white with increasing opacity, and the material tints them, so the
+ * further layers read as lighter and lower-contrast through the haze — which is what
+ * makes a horizon look like distance rather than like a wall.
+ *
+ * Every harmonic is an integer multiple of the width, so the silhouette tiles seamlessly
+ * all the way around the band.
+ *
+ * @param {{size?:number, height?:number, layers?:number, jaggedness?:number, seed?:number}} [options]
+ */
+export function createRidgeTexture({
+  size = 1024,
+  height = 256,
+  layers = 3,
+  jaggedness = 0.45,
+  seed = 17,
+} = {}) {
+  const random = seededRandom(seed);
+  const canvas = createCanvas(size, height);
+  const context = canvas.getContext('2d');
+  context.clearRect(0, 0, size, height);
+
+  for (let layer = 0; layer < layers; layer += 1) {
+    // 0 for the furthest ridge, 1 for the nearest.
+    const depth = layers === 1 ? 1 : layer / (layers - 1);
+    const baseY = height * (0.99 - layer * 0.1);
+    const peak = height * (0.16 + jaggedness * 0.45) * (0.55 + depth * 0.7);
+
+    // Integer harmonics only, so the ridge joins up where the texture repeats.
+    const harmonics = [];
+    const frequencies = [2, 3, 5, 7, 11];
+    for (let i = 0; i < 4; i += 1) {
+      harmonics.push({
+        k: frequencies[(i + layer) % frequencies.length],
+        a: 0.2 + random() * 0.5,
+        p: random() * Math.PI * 2,
+      });
+    }
+
+    context.beginPath();
+    context.moveTo(0, height);
+    for (let x = 0; x <= size; x += 1) {
+      const t = x / size;
+      let sum = 0;
+      for (const harmonic of harmonics) {
+        sum += harmonic.a * Math.sin(t * Math.PI * 2 * harmonic.k + harmonic.p);
+      }
+      context.lineTo(x, baseY - (Math.max(0, sum) / 1.6) * peak);
+    }
+    context.lineTo(size, height);
+    context.closePath();
+
+    // Nearer ridges are denser; the haze does the rest.
+    context.fillStyle = `rgba(255,255,255,${0.34 + depth * 0.5})`;
+    context.fill();
+  }
+
+  // Haze thickens toward the bottom of the band, so the base of the range fades out
+  // before the peaks do. Clipped to the silhouette by `source-atop`.
+  const haze = context.createLinearGradient(0, height * 0.35, 0, height);
+  haze.addColorStop(0, 'rgba(255,255,255,0)');
+  haze.addColorStop(1, 'rgba(255,255,255,0.55)');
+  context.globalCompositeOperation = 'source-atop';
+  context.fillStyle = haze;
+  context.fillRect(0, 0, size, height);
+  context.globalCompositeOperation = 'source-over';
+
+  const texture = toCard(canvas, { srgb: true });
+  texture.wrapS = RepeatWrapping;
+  return texture;
+}
+
+/**
  * Sea surface maps.
  *
  * A wave normal map built from summed sine waves, so it tiles seamlessly. Two sets

@@ -17,6 +17,7 @@ import {
 } from '../src/assets/loft.js';
 import { buildProbeGlb, toPayload } from '../tools/pack-models.mjs';
 import { MeshBasicMaterial, Vector3 } from 'three';
+import { mergeStaticParts } from '../src/assets/mergeStaticParts.js';
 import {
   FLAPERON_SHARE,
   FLAPERON_SPAN,
@@ -27,7 +28,8 @@ import {
 import { loadPackedModel } from '../src/assets/modelRegistry.js';
 import { AIRCRAFT } from '../src/data/aircraft.js';
 import { createSeededRandom } from '../src/game/math.js';
-import { buildIslandGeometry } from '../src/scene/Terrain.js';
+import { TERRAIN_KINDS } from '../src/scene/scenery.js';
+import { buildTerrainGeometry } from '../src/scene/Terrain.js';
 
 /** A stand-in material set, so an airframe can be built without a renderer. */
 function testMaterials() {
@@ -219,8 +221,9 @@ test('a missing packed model falls back instead of throwing', async () => {
 
 /* ---------------------------------------------------------------- island geometry */
 
-test('island geometry faces up, meets the waterline and is deterministic', () => {
-  const build = (seed) => buildIslandGeometry(createSeededRandom(seed));
+test('terrain geometry faces up, meets the waterline and is deterministic', () => {
+  const build = (seed, kind = TERRAIN_KINDS.islands) =>
+    buildTerrainGeometry(createSeededRandom(seed), kind);
   const geometry = build(5);
   const position = geometry.getAttribute('position');
   const index = geometry.getIndex();
@@ -267,7 +270,83 @@ test('island geometry faces up, meets the waterline and is deterministic', () =>
   );
 });
 
-/* --------------------------------------------------------------- control surfaces */
+/* ------------------------------------------------------------------ scenery kinds */
+
+test('the mountain kind builds a taller, rougher ridge than the island kind', () => {
+  const island = buildTerrainGeometry(createSeededRandom(31), TERRAIN_KINDS.islands);
+  const mountain = buildTerrainGeometry(createSeededRandom(31), TERRAIN_KINDS.mountains);
+
+  const peak = (geometry) => geometry.boundingBox.max.y;
+  const width = (geometry) =>
+    Math.max(
+      geometry.boundingBox.max.x - geometry.boundingBox.min.x,
+      geometry.boundingBox.max.z - geometry.boundingBox.min.z,
+    );
+
+  assert.ok(
+    peak(mountain) > peak(island) * 3,
+    `mountains are far taller than islands (${peak(mountain).toFixed(0)} m vs ${peak(island).toFixed(0)} m)`,
+  );
+  assert.ok(width(mountain) > width(island), 'and broader at the base');
+  assert.ok(mountain.getAttribute('position').count > island.getAttribute('position').count);
+
+  // Both kinds face upward, so the second kind is not inside out.
+  for (const geometry of [island, mountain]) {
+    const position = geometry.getAttribute('position');
+    const index = geometry.getIndex();
+    const a = new Vector3();
+    const b = new Vector3();
+    const c = new Vector3();
+    const ab = new Vector3();
+    const ac = new Vector3();
+    const normal = new Vector3();
+    let sum = 0;
+    for (let i = 0; i < index.count; i += 3) {
+      a.fromBufferAttribute(position, index.getX(i));
+      b.fromBufferAttribute(position, index.getX(i + 1));
+      c.fromBufferAttribute(position, index.getX(i + 2));
+      normal.crossVectors(ab.subVectors(b, a), ac.subVectors(c, a));
+      sum += normal.y;
+    }
+    assert.ok(sum > 0, 'every face points up');
+  }
+});
+
+test('a kind with no land builds nothing at all', () => {
+  const geometry = buildTerrainGeometry(createSeededRandom(3), TERRAIN_KINDS.none);
+  assert.ok(geometry.boundingBox.max.y <= 0.001, 'open water has no height');
+  assert.equal(TERRAIN_KINDS.none.density, 0, 'and nothing is placed');
+});
+
+/* --------------------------------------------------------------- merging an airframe */
+
+test('merging an airframe keeps every triangle and collapses the draw calls', () => {
+  const count = (root) => {
+    let meshes = 0;
+    let triangles = 0;
+    root.traverse((child) => {
+      if (!child.isMesh) return;
+      meshes += 1;
+      const index = child.geometry.getIndex();
+      triangles += (index ? index.count : child.geometry.getAttribute('position').count) / 3;
+    });
+    return { meshes, triangles };
+  };
+
+  const built = buildFighter({ ...AIRCRAFT[0].shape, name: 'merge-test' }, testMaterials());
+  const before = count(built);
+
+  const merged = mergeStaticParts(built);
+  const after = count(merged);
+
+  assert.ok(before.meshes > 20, `the airframe is built from many parts (${before.meshes})`);
+  assert.ok(after.meshes < before.meshes / 3, `merging collapses them (${before.meshes} -> ${after.meshes})`);
+  assert.ok(
+    Math.abs(after.triangles - before.triangles) < 1,
+    `and keeps every triangle (${before.triangles} -> ${after.triangles})`,
+  );
+  assert.ok(merged.children.length > 0, 'the merged model still has geometry');
+});
 
 test('the airframe exposes its moving surfaces, hinged where they belong', () => {
   const shape = AIRCRAFT[0].shape;

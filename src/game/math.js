@@ -45,6 +45,19 @@ export function radialDistance(x, z) {
   return Math.hypot(x, z);
 }
 
+/** The signed shortest angle from one heading to another, in (−π, π]. */
+export function shortestAngle(from, to) {
+  let difference = (to - from) % (Math.PI * 2);
+  if (difference > Math.PI) difference -= Math.PI * 2;
+  if (difference <= -Math.PI) difference += Math.PI * 2;
+  return difference;
+}
+
+/** Linear interpolation, clamped at both ends. */
+export function lerp(from, to, t) {
+  return from + (to - from) * clamp(t, 0, 1);
+}
+
 /**
  * A small deterministic PRNG (xorshift32), returning values in [0, 1).
  *

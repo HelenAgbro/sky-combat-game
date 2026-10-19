@@ -4,19 +4,17 @@ A 3D aerial combat arcade game for [start.ng](https://start.ng) — third-person
 jet flight over sweeping scenery, with coins, power-ups, fuel, enemies and a public
 leaderboard ranked on distance.
 
-**Stage 4 status: aircraft assets and visual quality.** You can fly it, and it looks
-like a place now: detailed airframes with moving control surfaces, an afterburner, a
-cloud layer, land, an improved sky and water with distance-faded detail. Enemies,
-weapons, coins, fuel, the hangar, the shop and the start.ng integration are Stages 5–9 —
-see [Stages](#stages).
+**Stage 6 status: the fight is in.** You can fly it, the world is continuous, and there are
+enemies to shoot, a gun to shoot them with, and balloons to fly around. Coins, fuel,
+power-ups, the hangar, the shop and the start.ng integration are Stages 7–9 — see
+[Stages](#stages).
 
-> **The aircraft is temporary artwork.** No licensed model is available yet — the
-> obvious sources were checked and none of them has a detailed fighter under a licence
-> this project can use (the findings are in [docs/ASSETS.md](docs/ASSETS.md)) — and
-> start.ng cannot serve `.glb`/`.gltf` files anyway, so the airframes are generated in
-> code. They are complete, fully-modelled shapes rather than placeholder primitives, but
-> they are still a stand-in, and the main menu says so. A licensed model drops in with no
-> code changes.
+> **The aircraft is temporary artwork.** No licensed model is available yet — the obvious
+> sources were checked and none of them has a detailed fighter under a licence this project
+> can use (the findings are in [docs/ASSETS.md](docs/ASSETS.md)) — and start.ng cannot serve
+> `.glb`/`.gltf` files anyway, so the airframes are generated in code. They are complete,
+> fully-modelled shapes rather than placeholder primitives, but they are still a stand-in,
+> and the main menu says so. A licensed model drops in with no code changes.
 
 ---
 
@@ -27,8 +25,8 @@ see [Stages](#stages).
 | Climb / dive | `W` / `S` or `↑` / `↓` | Drag the stick up / down |
 | Roll and turn | `A` / `D` or `←` / `→` | Drag the stick left / right |
 | Rudder (fine aiming) | `Q` / `E` | — |
+| Fire | `Space` | Fire button |
 | Boost | `Shift` | Boost button |
-| Fire | `Space` | Fire button *(reserved for the combat stage)* |
 | Pause / resume | `P` or `Escape` | Pause button |
 
 The throttle is automatic: the aircraft holds a cruise setting and `Shift` is the
@@ -49,6 +47,34 @@ The aircraft is held inside a play area rather than fenced in by an invisible wa
   middle, and a hard limit at 4200 m as the last resort.
 
 The HUD tells you when a limit is being pushed against. Nothing teleports.
+
+## The fight
+
+Fictional arcade dogfighting. There are three enemy aircraft (Wasp, Kite and Ember), a gun,
+and tethered balloons to fly around. Nothing here models a real air force.
+
+- **Enemies** fly readable patterns — patrol, weave, orbit and engage — rather than a flight
+  model, and they are always placed *off* your flight path so every one is avoidable. They
+  arrive more often, fly faster and shoot more as the run goes on.
+- **The gun** fires at its own cadence while you hold it, and inherits your own speed, so
+  flying fast makes it hit harder. The reticle is drawn where the nose actually points, not
+  in the middle of the frame.
+- **Hazards** are balloons drifting in your altitude band. Flying into one bursts it and
+  takes a third of your hull.
+- **The run ends** when the hull reaches zero, and the summary reports distance, kills,
+  score, time, shots fired and accuracy.
+
+**Nothing is allocated while the fight runs.** Enemies, hazards, shots and hit flashes are
+all fixed pools created at start-up, and a shot or an enemy that is done is handed straight
+back. `docs/COMBAT.md` has the details, including the three rules that make a duplicate score
+event structurally impossible.
+
+## The world
+
+The world is continuous in every direction and never accumulates scenery: it is a grid of
+cells with a fixed pool of landforms re-pointed at them as you fly, and a ring of clouds
+recycled the same way. `docs/SCENERY.md` explains the whole system, including how a second
+scenery zone would be added — it is data, not code.
 
 ## Visual quality
 
@@ -107,12 +133,13 @@ the result.
 ## Testing
 
 ```bash
-npm run test:unit         # 57 pure-logic tests: flight model, state machine, quality tiers,
-                          # cloud and island layout, control-surface signs, assets, data
+npm run test:unit         # 79 pure-logic tests: flight model, state machine, quality tiers,
+                          # cloud and island layout, zone blending, collisions, the difficulty
+                          # ramp, spawn placement, enemy patterns, the object pool, assets, data
 npm run smoke             # opens dist/ in headless Chrome, flies, screenshots, fails on errors
-npm run test:acceptance   # 9 browser checks: framing at six viewport shapes, resize, the WebGL
+npm run test:acceptance   # 11 browser checks: framing at six viewport shapes, resize, the WebGL
                           # failure path, keyboard and touch, pause, smoothness, the scene's
-                          # resource budget, and cleanup
+                          # resource budget, a full zone transition, and the fight
 npm test                  # all three
 ```
 
@@ -155,28 +182,39 @@ The game is published as **`sky-combat`** and plays at <https://sky-combat.start
 ```
 src/
   index.html          the page (the Vite entry — there is deliberately none at the repo root)
-  main.js             boot: WebGL probe, loading screen, menu, automation surface
+  main.js             boot: WebGL probe, loading screen, menu, results, automation surface
   game/               Game.js (renderer, loop, scene wiring), GameState.js, config.js, math.js
-  scene/              Sky.js, Clouds.js, Terrain.js, World.js, Lighting.js, Effects.js,
-                      CameraController.js, cloudLayout.js, islandLayout.js
+  scene/              Sky.js, Clouds.js, Terrain.js, DistantRidge.js, World.js, Lighting.js,
+                      Effects.js, CameraController.js, ZoneDirector.js, zoneBlend.js,
+                      scenery.js, cloudLayout.js, islandLayout.js
   aircraft/           AircraftFactory.js, PlayerAircraft.js, AircraftController.js, surfaces.js
-  assets/             loft.js, textures.js, modelRegistry.js, base64.js, models/Fighter.js
+  combat/             Combat.js, Enemies.js, Obstacles.js, Projectiles.js, Impacts.js, Pool.js,
+                      collisions.js, difficulty.js, motion.js, spawn.js
+  assets/             loft.js, textures.js, mergeStaticParts.js, modelRegistry.js, base64.js,
+                      models/Fighter.js
   systems/            QualityManager.js, InputManager.js, controls.js
-  ui/                 MainMenu.js, HUD.js, PauseScreen.js, TouchControls.js, Loading.js,
-                      FatalPanel.js, PerfReadout.js
-  data/               aircraft.js, zones.js
+  ui/                 MainMenu.js, HUD.js, PauseScreen.js, ResultsScreen.js, TouchControls.js,
+                      Loading.js, FatalPanel.js, PerfReadout.js
+  data/               aircraft.js, enemies.js, zones.js
   styles/             main.css, screens.css, hud.css
 public/               copied verbatim into dist/: startng.json, cover.png, favicon.svg, models/
 assets/               source art (licensed .glb masters) — never shipped
 tools/                serve, cover, pack-models, check, publish
-tests/                unit, assets, content, controls, smoke, acceptance
-docs/                 PLATFORM.md, ASSETS.md
+tests/                unit, combat, assets, content, controls, smoke, acceptance
+docs/                 PLATFORM.md, ASSETS.md, SCENERY.md, COMBAT.md
 dist/                 the committed, ready-to-play build
 ```
 
-The layout modules (`cloudLayout.js`, `islandLayout.js`) and the surface angles
-(`surfaces.js`) are deliberately pure — no Three.js, no DOM — so the recycling rules, the
-hash grid and the hinge signs are unit tested in plain Node rather than eyeballed.
+The layout modules (`cloudLayout.js`, `islandLayout.js`), the zone blend (`zoneBlend.js`), the
+surface angles (`surfaces.js`) and everything under `combat/` that is not a Three.js object are
+deliberately pure — no renderer, no DOM — so the recycling rules, the hash grid, the hinge
+signs, the collision maths, the difficulty ramp and the spawn placement are unit tested in
+plain Node rather than eyeballed.
+
+Four documents carry the reasoning: **[docs/PLATFORM.md](docs/PLATFORM.md)** for the start.ng
+rules the project is built against, **[docs/ASSETS.md](docs/ASSETS.md)** for how the aircraft
+are modelled and why no `.glb` is shipped, **[docs/SCENERY.md](docs/SCENERY.md)** for the
+continuous world, and **[docs/COMBAT.md](docs/COMBAT.md)** for the fight.
 
 Two documents carry the reasoning behind the structure: **[docs/PLATFORM.md](docs/PLATFORM.md)**
 for the start.ng rules the project is built against, and **[docs/ASSETS.md](docs/ASSETS.md)**
@@ -189,13 +227,13 @@ for how the aircraft are modelled and why no `.glb` file is shipped.
 | 1 | Repository and environment inspection, architecture, asset strategy | done |
 | 2 | Vite + Three.js, scene, lighting, procedural Falcon, chase camera, menu | done |
 | 3 | Flight controls, banking, touch controls, flight area, engine glow | done |
-| 4 | Aircraft assets and visual quality: airframe detail, materials, afterburner, sky, clouds, land, water | **this build** |
-| 5 | Obstacles, enemies, projectiles, collisions, combat | next |
-| 6 | Coins, fuel, power-ups, distance, difficulty | |
-| 7 | Hangar, unlocks, weapon shop, local progression | |
-| 8 | Scenery zones, audio, interface polish, optimisation | |
-| 9 | start.ng identity, profile card, leaderboard | |
-| 10 | Regression tests, production build, publish | |
+| 4 | Aircraft assets and visual quality: airframe detail, materials, afterburner, sky, clouds, land, water | done |
+| 5 | Environment generation and scenery zones: distant terrain, kinds, transitions | **done, one zone polished** |
+| 6 | Enemies, projectiles, obstacles and combat | **this build** |
+| 7 | Coins, fuel, power-ups, distance, difficulty | next |
+| 8 | Hangar, unlocks, weapon shop, local progression | |
+| 9 | Scenery zones art pass, audio, interface polish, optimisation | |
+| 10 | start.ng identity, profile card, leaderboard, publish | |
 
 ## Licence
 

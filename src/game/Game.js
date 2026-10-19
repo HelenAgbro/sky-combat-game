@@ -17,23 +17,37 @@ import {
   PerspectiveCamera,
   Scene,
   SRGBColorSpace,
+  Vector3,
   WebGLRenderer,
 } from 'three';
 import { AircraftFactory } from '../aircraft/AircraftFactory.js';
 import { PlayerAircraft } from '../aircraft/PlayerAircraft.js';
+import { Combat } from '../combat/Combat.js';
 import { DEFAULT_AIRCRAFT_ID } from '../data/aircraft.js';
 import { DEFAULT_ZONE_ID, getZone } from '../data/zones.js';
 import { CameraController } from '../scene/CameraController.js';
 import { Clouds } from '../scene/Clouds.js';
+import { DistantRidge } from '../scene/DistantRidge.js';
 import { Lighting } from '../scene/Lighting.js';
 import { Sky } from '../scene/Sky.js';
 import { Terrain } from '../scene/Terrain.js';
 import { World } from '../scene/World.js';
+import { ZoneDirector } from '../scene/ZoneDirector.js';
 import { PRESETS, QualityManager, pickTier, readDeviceMetrics } from '../systems/QualityManager.js';
 import { DEMO_FLIGHT, RENDER } from './config.js';
 import { GameState, STATES } from './GameState.js';
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+/** Controls centred, for the glide after a run ends. */
+const COAST_INPUT = Object.freeze({
+  pitch: 0,
+  roll: 0,
+  yaw: 0,
+  throttle: 0.5,
+  boost: false,
+  fire: false,
+});
 
 export class Game {
   /** Bound listener handles, declared here because they are assigned in a method. */
@@ -121,6 +135,37 @@ export class Game {
     this.terrain = new Terrain(zone, this.quality.preset);
     this.scene.add(this.terrain.group);
 
+    // The horizon band: the land beyond the play area, which is what stops the world
+    // being a flat line where the water meets the sky.
+    this.ridge = new DistantRidge(zone, this.quality.preset);
+    this.scene.add(this.ridge.group);
+
+    /*
+     * One place that decides which zone is on show and blends the move between them. The
+     * modules above already know how to dress themselves for a zone; the director is what
+     * hands them a blended one while a transition runs.
+     */
+    this.zones = new ZoneDirector(
+      {
+        sky: this.sky,
+        world: this.world,
+        lighting: this.lighting,
+        clouds: this.clouds,
+        terrain: this.terrain,
+        ridge: this.ridge,
+        renderer: this.renderer,
+        scene: this.scene,
+        zone,
+      },
+      { preset: this.quality.preset },
+    );
+
+    // The fight. Everything it owns is pooled, and it runs on the fixed step, so pausing
+    // the game pauses all of it without it knowing anything about pausing.
+    this.combat = new Combat({ preset: this.quality.preset });
+    this.scene.add(this.combat.group);
+    this.combat.on('destroyed', (payload) => this.#onDestroyed(payload));
+
     this.factory = new AircraftFactory({
       anisotropy: this.quality.preset.anisotropy,
       paintTextureSize: this.quality.preset.paintTextureSize,
@@ -157,24 +202,67 @@ export class Game {
       frameMs: this.frameMs,
       frameCount: this.frameCount,
       modelSource: this.aircraft?.source ?? 'none',
+      zone: this.zones?.zone.id ?? 'none',
       /** Scene budget: what the atmosphere and the land are actually costing. */
       clouds: this.clouds?.count ?? 0,
       islands: this.terrain?.placed ?? 0,
       islandCapacity: this.terrain?.capacity ?? 0,
       /** Whether the airframe has moving control surfaces to deflect. */
       controlSurfaces: Boolean(this.aircraft?.surfaces),
+      /** Where the nose is pointing on screen, as a percentage of the frame. */
+      reticle: this.#projectReticle(),
+      ...(this.combat?.telemetry() ?? {}),
       ...(this.aircraft?.telemetry() ?? {}),
     };
   }
 
+  /**
+   * Project a point far down the aircraft's own nose into screen space.
+   *
+   * The reticle has to be where the gun is pointing, not in the middle of the frame: the
+   * chase camera sits above and behind the aircraft, so the nose is not at the centre and
+   * moves around the frame as the aircraft pitches and rolls.
+   */
+  #projectReticle() {
+    if (!this.camera || !this.aircraft) return null;
+    this.#reticlePoint
+      .copy(this.aircraft.renderPosition)
+      .addScaledVector(this.aircraft.forward, 600)
+      .project(this.camera);
+
+    return {
+      x: (this.#reticlePoint.x * 0.5 + 0.5) * 100,
+      y: (-this.#reticlePoint.y * 0.5 + 0.5) * 100,
+      // A point behind the camera projects to nonsense; the HUD hides it instead.
+      onScreen: this.#reticlePoint.z <= 1,
+    };
+  }
+
+  #reticlePoint = new Vector3();
+
   /** Begin a flight. */
   start() {
     this.aircraft.reset();
+    this.combat?.reset();
     this.cameraRig.snap(this.aircraft);
     this.accumulator = 0;
     if (!this.state.set(STATES.FLYING)) return false;
     this.#run();
     return true;
+  }
+
+  /**
+   * Move to another scenery zone over `seconds`.
+   *
+   * The architecture for later transitions: one call, and the sky, the water, the fog, the
+   * light, the clouds and the land all cross-fade together. Only the coastal zone is
+   * polished so far — see docs/SCENERY.md.
+   *
+   * @param {string} id
+   * @param {{seconds?:number}} [options]
+   */
+  setZone(id, options) {
+    return this.zones?.setZone(id, options) ?? false;
   }
 
   /**
@@ -210,6 +298,7 @@ export class Game {
     if (this.state.is(STATES.ERROR)) return false;
     this.state.set(STATES.MENU);
     this.aircraft.reset();
+    this.combat?.reset();
     this.cameraRig.snap(this.aircraft);
     this.#run();
     return true;
@@ -281,6 +370,10 @@ export class Game {
     this.world.update(dt, focus);
     this.clouds.update(dt, this.camera, focus, this.aircraft.forward);
     this.terrain.update(focus);
+    this.ridge.update(this.camera);
+    // A zone transition, if one is running. Nothing happens on an ordinary frame.
+    this.zones.update(dt);
+    this.combat.updateVisuals(dt, this.camera);
     if (this.cameraOverride) this.cameraOverride(this.camera, this.aircraft);
     else this.cameraRig.update(dt, this.aircraft);
   }
@@ -289,12 +382,34 @@ export class Game {
     // A paused or failed game holds its last state; everything else keeps flying.
     if (this.state.is(STATES.PAUSED, STATES.ERROR)) return;
 
-    // Flying is the player's aircraft; the menu backdrop flies itself.
+    // Flying is the player's aircraft and the fight; the menu backdrop flies itself.
     if (this.state.is(STATES.FLYING)) {
       this.aircraft.update(step, this.input?.read());
+      this.combat.update(step, this.aircraft.controller);
       return;
     }
+
+    // A finished run: the wreck glides on with the controls centred, rather than keeping
+    // whatever the player was holding when it came apart.
+    if (this.state.is(STATES.RESULTS)) {
+      this.aircraft.update(step, COAST_INPUT);
+      return;
+    }
+
     this.aircraft.update(step, this.#demoInput(step));
+  }
+
+  /**
+   * The player's aircraft has been destroyed.
+   *
+   * Called once per run, and only from FLYING. `Combat` sets its own `ended` flag before it
+   * emits, and the state machine refuses a second move to RESULTS, so a burst of collisions
+   * arriving in the same frame cannot end the run twice or show two summaries.
+   */
+  #onDestroyed(payload) {
+    if (!this.state.is(STATES.FLYING)) return;
+    this.state.set(STATES.RESULTS);
+    this.emit('destroyed', { ...payload, ...this.telemetry() });
   }
 
   /**
@@ -363,6 +478,8 @@ export class Game {
     this.world?.dispose();
     this.clouds?.dispose();
     this.terrain?.dispose();
+    this.ridge?.dispose();
+    this.combat?.dispose();
     this.factory?.dispose();
     this.renderer?.dispose();
     this.listeners.clear();
