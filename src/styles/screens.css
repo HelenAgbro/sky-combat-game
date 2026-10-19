@@ -134,6 +134,33 @@
   color: #e2b76a;
 }
 
+/* -------------------------------------------------------------- pause screen */
+
+.pause {
+  background: radial-gradient(ellipse at 50% 40%, rgba(16, 24, 40, 0.72) 0%, rgba(4, 7, 14, 0.86) 78%);
+}
+
+.pause-title {
+  margin-top: 4px;
+  font-size: 34px;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+}
+
+.pause-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.pause-note {
+  margin-top: 18px;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
 /* -------------------------------------------------------------- perf meter */
 
 .perf {

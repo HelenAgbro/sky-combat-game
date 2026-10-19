@@ -1,0 +1,229 @@
+/* Sky Combat — the in-flight readout and the on-screen touch controls. */
+
+/* -------------------------------------------------------------------- HUD */
+
+.hud {
+  position: absolute;
+  inset: 0;
+  display: none;
+  pointer-events: none;
+}
+
+.hud.is-visible {
+  display: block;
+}
+
+.hud-readout {
+  position: absolute;
+  top: max(14px, env(safe-area-inset-top));
+  left: max(16px, env(safe-area-inset-left));
+  display: flex;
+  gap: 18px;
+  padding: 10px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: rgba(9, 15, 26, 0.6);
+  backdrop-filter: blur(8px);
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-item {
+  display: flex;
+  flex-direction: column;
+  min-width: 62px;
+}
+
+.hud-item span {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.hud-item b {
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.hud-item i {
+  font-size: 10px;
+  font-style: normal;
+  color: var(--muted);
+}
+
+/* Shown when the aircraft is against a flight-area limit. */
+.hud-warning {
+  position: absolute;
+  top: max(18px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 9px 20px;
+  border: 1px solid rgba(226, 183, 106, 0.5);
+  border-radius: 999px;
+  background: rgba(40, 28, 10, 0.72);
+  color: #f0c987;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.hud-hint {
+  position: absolute;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  opacity: 0.75;
+}
+
+/* ----------------------------------------------------------- touch controls */
+
+.touch {
+  position: absolute;
+  inset: 0;
+  display: none;
+  pointer-events: none;
+  /* The game owns every gesture inside this layer. */
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.touch.is-visible {
+  display: block;
+}
+
+/* Left half of the screen steers. The stick is placed wherever the thumb lands. */
+.touch-zone {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 50%;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.touch-base {
+  position: absolute;
+  /* Default resting place, until the first touch moves it. */
+  left: 30%;
+  top: 66%;
+  width: 150px;
+  height: 150px;
+  transform: translate(-50%, -50%);
+  border: 2px solid rgba(216, 253, 113, 0.28);
+  border-radius: 50%;
+  background: rgba(9, 15, 26, 0.34);
+  opacity: 0.5;
+  transition: opacity 0.15s ease, border-color 0.15s ease;
+}
+
+.touch-base.is-active {
+  opacity: 0.95;
+  border-color: rgba(216, 253, 113, 0.65);
+}
+
+.touch-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 64px;
+  height: 64px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, rgba(216, 253, 113, 0.95), rgba(150, 190, 70, 0.75));
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
+.touch-actions {
+  position: absolute;
+  right: max(20px, env(safe-area-inset-right));
+  bottom: max(24px, env(safe-area-inset-bottom));
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  pointer-events: none;
+}
+
+.touch-btn {
+  pointer-events: auto;
+  display: grid;
+  place-items: center;
+  border: 2px solid rgba(255, 255, 255, 0.22);
+  border-radius: 50%;
+  background: rgba(9, 15, 26, 0.55);
+  color: var(--ink);
+  font-family: inherit;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  touch-action: none;
+  user-select: none;
+  transition: transform 0.08s ease, background 0.08s ease;
+}
+
+.touch-btn.is-pressed {
+  transform: scale(0.94);
+  background: rgba(216, 253, 113, 0.28);
+}
+
+/* Comfortably above the 44 px minimum for a touch target. */
+.touch-fire {
+  width: 98px;
+  height: 98px;
+  font-size: 15px;
+  border-color: rgba(216, 253, 113, 0.45);
+}
+
+.touch-boost {
+  width: 78px;
+  height: 78px;
+  font-size: 12px;
+}
+
+.touch-pause {
+  position: absolute;
+  top: max(16px, env(safe-area-inset-top));
+  right: max(16px, env(safe-area-inset-right));
+  width: 54px;
+  height: 54px;
+  pointer-events: auto;
+  border: 2px solid rgba(255, 255, 255, 0.22);
+  border-radius: 50%;
+  background: rgba(9, 15, 26, 0.55);
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1;
+  touch-action: none;
+}
+
+/* The HUD readout would sit under the pause button on a narrow screen. */
+@media (max-width: 620px) {
+  .hud-readout {
+    gap: 12px;
+    padding: 8px 12px;
+  }
+
+  .hud-item {
+    min-width: 52px;
+  }
+
+  .hud-item b {
+    font-size: 17px;
+  }
+
+  .hud-hint {
+    display: none;
+  }
+
+  .hud-warning {
+    top: auto;
+    bottom: max(150px, calc(env(safe-area-inset-bottom) + 150px));
+    font-size: 12px;
+  }
+}
