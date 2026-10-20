@@ -40,6 +40,10 @@ export const PRESETS = Object.freeze({
     obstacles: 4,
     /** Impact flashes alive at once. One instanced draw call. */
     impacts: 16,
+    /** Coins alive at once. One instanced draw call. */
+    coins: 24,
+    /** Fuel canisters and power-ups alive at once, sharing one pool. */
+    supplies: 4,
     paintTextureSize: 512,
     cloudTextureSize: 128,
     ridgeTextureSize: 256,
@@ -59,6 +63,8 @@ export const PRESETS = Object.freeze({
     enemies: 5,
     obstacles: 8,
     impacts: 24,
+    coins: 40,
+    supplies: 6,
     paintTextureSize: 1024,
     cloudTextureSize: 256,
     ridgeTextureSize: 512,
@@ -78,6 +84,8 @@ export const PRESETS = Object.freeze({
     enemies: 7,
     obstacles: 12,
     impacts: 32,
+    coins: 64,
+    supplies: 8,
     paintTextureSize: 1024,
     cloudTextureSize: 256,
     ridgeTextureSize: 512,

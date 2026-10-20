@@ -47,6 +47,11 @@ export const FLIGHT = {
   /** Fuel burn per second at full throttle, as a fraction of a full tank. */
   fuelBurnPerSecond: 0.0125,
   boostBurnMultiplier: 2.4,
+  /**
+   * Below this fraction of a tank the HUD warns, and the run is nearly over. Fuel is a
+   * clock the player can see and, with a canister, reset — not a hidden timer.
+   */
+  lowFuelWarning: 0.22,
   /** The aircraft starts airborne at this altitude. */
   startAltitude: 420,
 };
@@ -233,5 +238,76 @@ export const COMBAT = {
     maxAlive: [2, 6],
     speed: [0.8, 1.15],
     fireRate: [0.4, 1],
+  },
+};
+
+/**
+ * Collectibles and reserves: coins, fuel canisters and power-ups.
+ *
+ * One block, because they share a shape — each is a thing placed ahead of the player on a
+ * timer, collected by flying into it, and given back when it is behind or too old. The
+ * coin *patterns* live in `pickups/pickupLayout.js`, and the power-up definitions — how
+ * long each lasts and what it does — in `pickups/powerUps.js`, so this file only carries
+ * where and how often things appear.
+ */
+export const PICKUPS = {
+  /** Coins: what makes a run worth steering for. */
+  coins: {
+    /** Collection radius, in metres. Generous, because a coin is taken at 150 m/s. */
+    radius: 7,
+    /** Seconds between one pattern and the next. */
+    interval: 3.4,
+    /** How far ahead of the player a pattern is anchored. */
+    minSpawnDistance: 750,
+    maxSpawnDistance: 1250,
+    /** How far the anchor may sit off the flight path, in metres. */
+    lateralSpread: 70,
+    /** Seconds a coin stays in the world before it is given back. */
+    lifespan: 30,
+    /** Metres behind the player, and metres away, at which a coin is given back. */
+    despawnBehind: 900,
+    despawnRange: 3200,
+    /** Seconds a collected coin takes to pop and vanish. */
+    collectTime: 0.3,
+  },
+
+  /**
+   * Fuel canisters. The burn itself lives in `FLIGHT`; this is the other half of the loop,
+   * and the reason fuel is a decision rather than a countdown.
+   */
+  fuel: {
+    radius: 10,
+    /** Seconds between canisters. */
+    interval: 7.5,
+    /** Fraction of a full tank one canister is worth. */
+    refill: 0.34,
+    minSpawnDistance: 800,
+    maxSpawnDistance: 1500,
+    /** Close enough to the flight path to be worth diverting for. */
+    minLateralOffset: 30,
+    maxLateralOffset: 240,
+    signedAltitude: false,
+    minVerticalOffset: 25,
+    maxVerticalOffset: 150,
+    lifespan: 45,
+    despawnBehind: 1200,
+    despawnRange: 3600,
+  },
+
+  /** Power-ups: rarer than fuel, and worth a bigger diversion. */
+  powerups: {
+    radius: 10,
+    /** Seconds between power-ups. */
+    interval: 15,
+    minSpawnDistance: 850,
+    maxSpawnDistance: 1700,
+    minLateralOffset: 30,
+    maxLateralOffset: 260,
+    signedAltitude: false,
+    minVerticalOffset: 25,
+    maxVerticalOffset: 170,
+    lifespan: 50,
+    despawnBehind: 1200,
+    despawnRange: 3800,
   },
 };

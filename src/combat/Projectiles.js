@@ -11,6 +11,7 @@
  */
 import {
   AdditiveBlending,
+  Color,
   CylinderGeometry,
   DynamicDrawUsage,
   InstancedMesh,
@@ -30,12 +31,14 @@ export class Projectiles {
   #pool;
   #dummy = new Object3D();
   #colour;
+  /** Scratch, so writing per-shot colours never allocates. */
+  #shotColour = new Color();
 
   /**
    * @param {{capacity:number, colour:string, name:string, radius?:number, length?:number}} options
    */
   constructor({ capacity, colour, name, radius = 0.09, length = 5.5 }) {
-    this.#colour = colour;
+    this.#colour = new Color(colour);
 
     this.#geometry = new CylinderGeometry(radius, radius, length, 5, 1, true);
     // Lay the rod along +Z, which is the axis the velocity is aligned to.
@@ -68,8 +71,15 @@ export class Projectiles {
         speed: 0,
         age: 0,
         life: 0,
+        /** Per-shot override, so special ammunition is visibly different. */
+        colour: null,
       }),
     });
+
+    // Allocate the per-instance colour buffer once, so a special round never creates one
+    // in the middle of a fight.
+    for (let i = 0; i < capacity; i += 1) this.#mesh.setColorAt(i, this.#colour);
+    this.#mesh.instanceColor.needsUpdate = true;
 
     this.#writeMatrices();
   }
@@ -97,9 +107,10 @@ export class Projectiles {
    * @param {Vector3} direction unit vector
    * @param {number} speed metres per second
    * @param {number} life seconds
+   * @param {string|null} [colour] per-shot override, for special ammunition
    * @returns {object|null} the shot, or null when the pool is exhausted
    */
-  fire(origin, direction, speed, life) {
+  fire(origin, direction, speed, life, colour = null) {
     const shot = this.#pool.acquire();
     if (!shot) return null;
 
@@ -109,6 +120,7 @@ export class Projectiles {
     shot.speed = speed;
     shot.age = 0;
     shot.life = life;
+    shot.colour = colour;
     return shot;
   }
 
@@ -142,7 +154,7 @@ export class Projectiles {
     this.#writeMatrices();
   }
 
-  /** Point every live rod along its velocity; hide the rest. */
+  /** Point every live rod along its velocity, colour it, and hide the rest. */
   #writeMatrices() {
     const items = this.#pool.items;
     for (let i = 0; i < items.length; i += 1) {
@@ -156,8 +168,10 @@ export class Projectiles {
       }
       this.#dummy.updateMatrix();
       this.#mesh.setMatrixAt(i, this.#dummy.matrix);
+      this.#mesh.setColorAt(i, shot.colour ? this.#shotColour.set(shot.colour) : this.#colour);
     }
     this.#mesh.instanceMatrix.needsUpdate = true;
+    this.#mesh.instanceColor.needsUpdate = true;
   }
 
   dispose() {

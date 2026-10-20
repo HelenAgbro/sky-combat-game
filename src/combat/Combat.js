@@ -57,6 +57,10 @@ export class Combat {
   #score = 0;
   #shotsFired = 0;
   #hits = 0;
+  /** Damage multiplier while special ammunition is loaded. 1 means the plain gun. */
+  #ammoMultiplier = 1;
+  /** Tracer colour for special rounds, or null for the gun's own. */
+  #ammoColour = null;
 
   constructor({ preset, config = COMBAT, seed = 1337 }) {
     this.#config = config;
@@ -102,6 +106,37 @@ export class Combat {
     return this.#obstacles;
   }
 
+  /**
+   * The shared hit-flash pool.
+   *
+   * Exposed so the pickups can flash on collection without a second effect pool and a
+   * second draw call: a coin popping and a shot landing are the same effect with
+   * different numbers. `Combat` keeps ownership and disposes it.
+   */
+  get impacts() {
+    return this.#impacts;
+  }
+
+  /**
+   * Load, or clear, special ammunition.
+   *
+   * Called every simulation step with whatever the power-up system currently reports, so
+   * there is one source of truth for how long it lasts and no way for the gun to be left
+   * loaded after the effect has expired.
+   *
+   * @param {number} multiplier damage multiplier; 1 is the plain gun
+   * @param {string|null} [colour] tracer colour for the special rounds
+   */
+  setSpecialAmmo(multiplier = 1, colour = null) {
+    this.#ammoMultiplier = multiplier > 1 ? multiplier : 1;
+    this.#ammoColour = this.#ammoMultiplier > 1 ? colour : null;
+  }
+
+  /** Whether special ammunition is currently loaded. */
+  get specialAmmo() {
+    return this.#ammoMultiplier > 1;
+  }
+
   get hull() {
     return this.#hull;
   }
@@ -131,6 +166,8 @@ export class Combat {
     this.#score = 0;
     this.#shotsFired = 0;
     this.#hits = 0;
+    // A new run starts with the plain gun, whatever the last one ended with.
+    this.setSpecialAmmo(1, null);
     this.#obstacles.reset();
   }
 
@@ -191,10 +228,21 @@ export class Combat {
     this.#aimFrom(player, MUZZLE_FORWARD, gun.spread);
     // The shot inherits the aircraft's own speed: flying fast makes the gun hit harder,
     // which is both true and satisfying.
-    const shot = this.#playerShots.fire(_origin, _direction, gun.speed + player.speed, gun.lifespan);
+    const shot = this.#playerShots.fire(
+      _origin,
+      _direction,
+      gun.speed + player.speed,
+      gun.lifespan,
+      this.#ammoColour,
+    );
     if (!shot) return;
 
-    this.#impacts.spawn(_origin, { size: 2.2, colour: '#fff0c0', life: 0.08, growth: 0.5 });
+    this.#impacts.spawn(_origin, {
+      size: this.specialAmmo ? 3.4 : 2.2,
+      colour: this.#ammoColour ?? '#fff0c0',
+      life: 0.08,
+      growth: 0.5,
+    });
   }
 
   /** Enemies shoot rarely, and only when the player is close enough to be a threat. */
@@ -271,7 +319,9 @@ export class Combat {
       const to = shot.position;
       this.#playerShots.release(shot);
       _point.lerpVectors(from, to, hitT);
-      this.#hitEnemy(hitEnemy, this.#config.gun.damage, _point);
+      // Read at the moment of impact: a shot fired during heavy rounds does heavy damage,
+      // and the multiplier is only ever read from the one place that sets it.
+      this.#hitEnemy(hitEnemy, this.#config.gun.damage * this.#ammoMultiplier, _point);
     }
   }
 
@@ -406,6 +456,8 @@ export class Combat {
       playerShots: this.#playerShots.activeCount,
       enemyShots: this.#enemyShots.activeCount,
       impacts: this.#impacts.activeCount,
+      /** Whether the heavy-rounds power-up is currently loaded. */
+      specialAmmo: this.specialAmmo,
       ended: this.#ended,
     };
   }

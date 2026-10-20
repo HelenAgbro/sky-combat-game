@@ -10,9 +10,15 @@
  *   5. the on-screen controls work on a phone-sized viewport, and a real tap reaches them;
  *   6. pause holds the simulation without duplicating the animation loop;
  *   7. the aircraft moves smoothly on a display faster than the 60 Hz simulation;
- *   8. the cloud field, the land, the water and the moving control surfaces stay inside
- *      their budget — nothing is created or destroyed in flight;
- *   9. renderer cleanup stops the loop and releases its resources without throwing.
+ *   8. the cloud field, the land, the water, the moving control surfaces and the fight stay
+ *      inside their budget — nothing is created or destroyed in flight;
+ *   9. a scenery zone transition runs end to end, there and back;
+ *  10. the fight works: enemies arrive and move, the gun fires and hits, a hazard costs one
+ *      collision's worth of hull, and one enemy is one reward;
+ *  11. coins, fuel and power-ups work: a coin is collected once, fuel burns and is
+ *      replenished, running dry ends the run, a power-up expires on time, and a new run
+ *      starts clean;
+ *  12. renderer cleanup stops the loop and releases its resources without throwing.
  *
  * This is not decoration. Check 1 caught the wingtips leaving the frame on a phone while
  * the camera offset was a fixed distance; check 8 is what would catch a scene that leaks
@@ -911,8 +917,211 @@ async function main() {
 
     await fight.close();
 
+    /*
+     * The collectibles. Everything here is driven through the real systems — a real coin
+     * placed on the nose, a real canister, a real power-up — rather than by calling the
+     * collection code directly, so what is checked is the game rather than the maths (which
+     * the unit tests already cover).
+     */
+    console.log('\n11. Do coins, fuel and power-ups work?');
+    const loot = await browser.newPage({ viewport: { width: 1024, height: 640 } });
+    await loot.route('https://start.ng/**', (route) => route.abort());
+    await loot.goto(`${base}/`, { waitUntil: 'load' });
+    await loot.waitForFunction(() => window.__sky?.ready, null, { timeout: 60000 });
+    await loot.click('[data-action="start"]');
+
+    // Coins appear on their own, without being asked.
+    let coinsLaidOut = true;
+    try {
+      await loot.waitForFunction(() => window.__sky.telemetry().coinsActive > 0, null, { timeout: 30000 });
+    } catch {
+      coinsLaidOut = false;
+    }
+
+    // One coin, placed on the nose: collected exactly once, however long it is sat on.
+    // The field is cleared first, so that a coin from a pattern ahead cannot be counted
+    // during the window and make this measure something other than the coin on the nose.
+    const placedOnNose = await loot.evaluate(() => {
+      const game = window.__sky.game;
+      game.pickups.reset();
+      game.pickups.placeCoin(game.aircraft.controller.position);
+      return game.telemetry().coins;
+    });
+
+    let collectedOnce = true;
+    try {
+      await loot.waitForFunction(
+        (expected) => window.__sky.telemetry().coins >= expected,
+        placedOnNose + 1,
+        { timeout: 30000 },
+      );
+    } catch {
+      collectedOnce = false;
+    }
+
+    // Long enough for the coin to finish popping. The count must not have moved again.
+    await loot.waitForTimeout(3000);
+    const coinTelemetry = await loot.evaluate(() => window.__sky.telemetry());
+
+    // Fuel burns, and a canister tops it back up.
+    const fuelBefore = await loot.evaluate(() => window.__sky.telemetry().fuel);
+    let fuelBurned = true;
+    try {
+      await loot.waitForFunction(
+        (before) => window.__sky.telemetry().fuel < before,
+        fuelBefore,
+        { timeout: 60000 },
+      );
+    } catch {
+      fuelBurned = false;
+    }
+
+    const refill = await loot.evaluate(() => {
+      const game = window.__sky.game;
+      const player = game.aircraft.controller;
+      player.fuel = 0.4;
+      const canister = game.pickups.spawnSupply('fuel', player);
+      if (!canister) return null;
+      canister.position.copy(player.position);
+      canister.anchorY = canister.position.y;
+      return player.fuel;
+    });
+
+    let refuelled = true;
+    try {
+      await loot.waitForFunction(() => window.__sky.telemetry().fuel > 0.4, null, { timeout: 30000 });
+    } catch {
+      refuelled = false;
+    }
+
+    const fuelShown = await loot.evaluate(() =>
+      Number(document.querySelector('[data-field="fuel"]')?.textContent ?? -1),
+    );
+    const coinsShown = await loot.evaluate(() =>
+      Number(document.querySelector('[data-field="coins"]')?.textContent ?? -1),
+    );
+
+    // A power-up starts on collection, shows a chip, and expires on its own.
+    const placedPowerUp = await loot.evaluate(() => {
+      const game = window.__sky.game;
+      const player = game.aircraft.controller;
+      const crate = game.pickups.spawnSupply('speed', player);
+      if (!crate) return false;
+      crate.position.copy(player.position);
+      crate.anchorY = crate.position.y;
+      return true;
+    });
+
+    let activated = true;
+    try {
+      await loot.waitForFunction(() => window.__sky.telemetry().powerUps.length > 0, null, { timeout: 30000 });
+    } catch {
+      activated = false;
+    }
+
+    const running = await loot.evaluate(() => {
+      const telemetry = window.__sky.telemetry();
+      const chip = document.querySelector('.hud-chip[data-powerup="speed"]');
+      return {
+        multiplier: telemetry.speedMultiplier,
+        chipShown: Boolean(chip && !chip.hidden),
+        chipTime: chip?.querySelector('.hud-chip-time')?.textContent ?? null,
+      };
+    });
+
+    let expired = true;
+    try {
+      await loot.waitForFunction(() => window.__sky.telemetry().powerUps.length === 0, null, { timeout: 180000 });
+    } catch {
+      expired = false;
+    }
+    const afterExpiry = await loot.evaluate(() => window.__sky.telemetry().speedMultiplier);
+
+    // Out of fuel ends the run, and the summary says so.
+    await loot.evaluate(() => {
+      window.__sky.game.aircraft.controller.fuel = 0.0005;
+    });
+
+    let endedOnFuel = true;
+    try {
+      await loot.waitForFunction(() => window.__sky.telemetry().state === 'results', null, { timeout: 60000 });
+    } catch {
+      endedOnFuel = false;
+    }
+    const finish = await loot.evaluate(() => ({
+      reason: window.__sky.telemetry().reason,
+      title: document.querySelector('.results-title')?.textContent ?? null,
+      coins: window.__sky.telemetry().coins,
+    }));
+
+    // And a new run starts clean.
+    await loot.evaluate(() => window.__sky.game.start());
+    const fresh = await loot.evaluate(() => {
+      const telemetry = window.__sky.telemetry();
+      return {
+        state: telemetry.state,
+        coins: telemetry.coins,
+        fuel: telemetry.fuel,
+        powerUps: telemetry.powerUps.length,
+        speedMultiplier: telemetry.speedMultiplier,
+        specialAmmo: telemetry.specialAmmo,
+      };
+    });
+
+    console.log(
+      `   coins: laid out on their own ${coinsLaidOut}` +
+        `   on the nose ${placedOnNose} -> ${coinTelemetry.coins} (still ${coinTelemetry.coinsActive} in the air)`,
+    );
+    console.log(
+      `   fuel: ${fuelBefore.toFixed(3)} -> burned ${fuelBurned}` +
+        `   canister ${refill} -> ${refuelled}   HUD fuel ${fuelShown}%  coins ${coinsShown}`,
+    );
+    console.log(
+      `   power-up: started ${placedPowerUp}, running ${activated}` +
+        `   multiplier ${running.multiplier}  chip ${running.chipShown} at ${running.chipTime}s` +
+        `   expired ${expired}, back to ${afterExpiry}`,
+    );
+    console.log(
+      `   out of fuel: ended ${endedOnFuel} as "${finish.reason}" ("${finish.title}")` +
+        `   with ${finish.coins} coin(s)`,
+    );
+    console.log(
+      `   new run: ${fresh.state}  coins ${fresh.coins}  fuel ${fresh.fuel}` +
+        `  power-ups ${fresh.powerUps}  speed x${fresh.speedMultiplier}  special ammo ${fresh.specialAmmo}`,
+    );
+
+    if (!coinsLaidOut) problems.push('no coins were laid out on their own');
+    if (!collectedOnce) problems.push('a coin on the nose was never collected');
+    if (coinTelemetry.coins !== placedOnNose + 1) {
+      problems.push(`one coin was counted ${coinTelemetry.coins - placedOnNose} times`);
+    }
+    if (!fuelBurned) problems.push('fuel did not burn down');
+    if (refill === null) problems.push('could not place a fuel canister');
+    if (!refuelled) problems.push('a fuel canister did not refuel the aircraft');
+    if (!Number.isFinite(fuelShown) || fuelShown < 0) problems.push('the HUD is not showing fuel');
+    if (coinsShown !== coinTelemetry.coins) problems.push('the HUD coin count does not match the run');
+    if (!placedPowerUp) problems.push('could not place a power-up');
+    if (!activated) problems.push('a power-up was collected but never started');
+    if (running.multiplier <= 1) problems.push(`the speed power-up did not take effect (x${running.multiplier})`);
+    if (!running.chipShown) problems.push('no HUD chip was shown for the running power-up');
+    if (!expired) problems.push('the power-up never expired');
+    if (afterExpiry !== 1) problems.push(`the effect outlived its timer (x${afterExpiry})`);
+    if (!endedOnFuel) problems.push('running out of fuel did not end the run');
+    if (finish.reason !== 'fuel') problems.push(`the run ended as "${finish.reason}" rather than on fuel`);
+    if (finish.title !== 'Out of fuel') problems.push(`the summary said "${finish.title}"`);
+    if (fresh.state !== 'flying') problems.push(`a new run did not start (${fresh.state})`);
+    if (fresh.coins !== 0) problems.push(`a new run inherited ${fresh.coins} coin(s)`);
+    // Not exactly 1: the aircraft is already flying and burning fuel by the time this is
+    // read. Anything near full is a reset; the point is that it is not the last run's.
+    if (fresh.fuel < 0.9) problems.push(`a new run started with ${fresh.fuel} fuel`);
+    if (fresh.powerUps !== 0) problems.push('a new run inherited a power-up');
+    if (fresh.speedMultiplier !== 1) problems.push('a new run inherited a speed boost');
+    if (fresh.specialAmmo) problems.push('a new run inherited special ammunition');
+
+    await loot.close();
+
     // ---------------------------------------------------------------- teardown
-    console.log('\n11. Does renderer cleanup run cleanly?');
+    console.log('\n12. Does renderer cleanup run cleanly?');
     const teardown = await browser.newPage({ viewport: { width: 800, height: 600 } });
     const teardownErrors = [];
     teardown.on('pageerror', (error) => teardownErrors.push(error.message));

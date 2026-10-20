@@ -57,6 +57,13 @@ export class AircraftController {
     this.speed = FLIGHT.cruiseSpeed;
     this.throttle = 0.6;
     this.fuel = 1;
+    /**
+     * Multiplier on the speed ceiling, set by whatever is granting extra speed — the
+     * speed power-up today. A plain number rather than a reference to the power-up
+     * system, so the flight model stays independent of what is granting it, and so a
+     * new run that forgets to clear it cannot inherit the last run's boost twice.
+     */
+    this.speedBoost = 1;
     this.elapsed = 0;
     this.distance = 0;
     this.input = { ...NEUTRAL_INPUT };
@@ -98,6 +105,22 @@ export class AircraftController {
     Object.assign(this.input, partial);
   }
 
+  /**
+   * Add fuel, clamped to a full tank.
+   *
+   * The clamp lives here rather than at the call site so there is exactly one place that
+   * decides what a legal amount of fuel is: a canister collected with a full tank is a
+   * wasted canister, never a tank of 1.3.
+   *
+   * @param {number} amount fraction of a tank to add
+   * @returns {number} the fuel actually taken on, which is 0 when the tank is already full
+   */
+  refuel(amount) {
+    const before = this.fuel;
+    this.fuel = clamp(this.fuel + Math.max(0, amount), 0, 1);
+    return this.fuel - before;
+  }
+
   reset({ position = null, altitude = FLIGHT.startAltitude } = {}) {
     this.position.set(0, altitude, 0);
     if (position) this.position.copy(position);
@@ -108,6 +131,8 @@ export class AircraftController {
     this.speed = FLIGHT.cruiseSpeed;
     this.throttle = 0.6;
     this.fuel = 1;
+    // A new run starts with no boost from the last one.
+    this.speedBoost = 1;
     this.elapsed = 0;
     this.distance = 0;
     this.input = { ...NEUTRAL_INPUT };
@@ -129,7 +154,10 @@ export class AircraftController {
     const requested = clamp(input.throttle ?? this.throttle, 0, 1);
     this.throttle += (requested - this.throttle) * Math.min(1, FLIGHT.throttleRate * 2 * dt);
 
-    const ceiling = FLIGHT.maxSpeed * scale.speed * (input.boost ? FLIGHT.boostMultiplier : 1);
+    // `speedBoost` is 1 unless something is granting extra speed; it scales the ceiling
+    // rather than the airspeed, so the throttle keeps meaning what it meant.
+    const ceiling =
+      FLIGHT.maxSpeed * scale.speed * (input.boost ? FLIGHT.boostMultiplier : 1) * this.speedBoost;
     const targetSpeed = FLIGHT.minSpeed + (ceiling - FLIGHT.minSpeed) * this.throttle;
     this.speed += (targetSpeed - this.speed) * Math.min(1, FLIGHT.speedResponse * dt);
 

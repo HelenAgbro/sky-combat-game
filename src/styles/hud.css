@@ -56,7 +56,9 @@
 /* Shown when the aircraft is against a flight-area limit. */
 .hud-warning {
   position: absolute;
-  top: max(18px, env(safe-area-inset-top));
+  /* Below the readout row: centred at the top it used to land on top of the last
+     readout, which is where the coin count now lives. */
+  top: max(104px, calc(env(safe-area-inset-top) + 104px));
   left: 50%;
   transform: translateX(-50%);
   padding: 9px 20px;
@@ -143,6 +145,99 @@
 
 .hud-hull b {
   color: #cfe9a8;
+}
+
+/* ------------------------------------------------- fuel, coins and power-ups */
+
+/* A thin progress bar, shared by the fuel readout and the power-up chips. */
+.hud-bar {
+  margin-top: 5px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  overflow: hidden;
+}
+
+.hud-bar > span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  background: #9ad36a;
+  /* Linear, and longer than a frame: the bar should slide, not step. */
+  transition: width 0.18s linear;
+}
+
+.hud-fuel b {
+  color: #a8d977;
+}
+
+.hud-coins b {
+  color: #ffc94d;
+}
+
+/* Low fuel: the number and the bar go amber. */
+.hud.is-low-fuel .hud-fuel b {
+  color: #f0a94a;
+}
+
+.hud.is-low-fuel .hud-fuel .hud-bar > span {
+  background: #f0a94a;
+}
+
+/*
+ * The power-up chips, one per effect that is running. A chip is shown while its effect
+ * lasts and hidden when it expires, so the timer is the whole indicator.
+ */
+.hud-powerups {
+  position: absolute;
+  top: max(96px, calc(env(safe-area-inset-top) + 96px));
+  left: max(16px, env(safe-area-inset-left));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hud-chip {
+  min-width: 138px;
+  padding: 6px 10px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-left: 3px solid var(--chip, #ffffff);
+  border-radius: 10px;
+  background: rgba(9, 15, 26, 0.6);
+  backdrop-filter: blur(6px);
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-chip[hidden] {
+  display: none;
+}
+
+.hud-chip-name {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--chip, #ffffff);
+}
+
+.hud-chip-time {
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+/* The unit comes from the stylesheet, so the HUD only ever writes the number. */
+.hud-chip-time::after {
+  content: 's';
+  margin-left: 1px;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.hud-chip .hud-bar > span {
+  background: var(--chip, #ffffff);
 }
 
 /* ----------------------------------------------------------- touch controls */
@@ -269,7 +364,10 @@
 /* The HUD readout would sit under the pause button on a narrow screen. */
 @media (max-width: 620px) {
   .hud-readout {
-    gap: 12px;
+    /* Seven readouts will not fit across a phone, so they wrap instead of overflowing. */
+    flex-wrap: wrap;
+    max-width: calc(100% - 24px);
+    gap: 10px 12px;
     padding: 8px 12px;
   }
 
@@ -279,6 +377,16 @@
 
   .hud-item b {
     font-size: 17px;
+  }
+
+  .hud-powerups {
+    top: auto;
+    bottom: max(210px, calc(env(safe-area-inset-bottom) + 210px));
+  }
+
+  .hud-chip {
+    min-width: 112px;
+    padding: 5px 9px 7px;
   }
 
   .hud-hint {

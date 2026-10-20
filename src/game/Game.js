@@ -25,6 +25,8 @@ import { PlayerAircraft } from '../aircraft/PlayerAircraft.js';
 import { Combat } from '../combat/Combat.js';
 import { DEFAULT_AIRCRAFT_ID } from '../data/aircraft.js';
 import { DEFAULT_ZONE_ID, getZone } from '../data/zones.js';
+import { Pickups } from '../pickups/Pickups.js';
+import { POWER_UPS } from '../pickups/powerUps.js';
 import { CameraController } from '../scene/CameraController.js';
 import { Clouds } from '../scene/Clouds.js';
 import { DistantRidge } from '../scene/DistantRidge.js';
@@ -70,6 +72,8 @@ export class Game {
     this.started = false;
     /** While true the aircraft flies the scripted Stage 2 sortie. */
     this.demo = true;
+    /** What ended the run — `'hull'`, `'fuel'` — or null while it is still going. */
+    this.reason = null;
     /** When set, replaces the chase camera. Used by the cover renderer. */
     this.cameraOverride = null;
   }
@@ -166,6 +170,17 @@ export class Game {
     this.scene.add(this.combat.group);
     this.combat.on('destroyed', (payload) => this.#onDestroyed(payload));
 
+    /*
+     * Coins, fuel and power-ups. They borrow the fight's hit-flash pool rather than owning
+     * a second one: a coin popping and a shot landing are the same effect with different
+     * numbers, and one pool is one draw call.
+     */
+    this.pickups = new Pickups({
+      preset: this.quality.preset,
+      impacts: this.combat.impacts,
+    });
+    this.scene.add(this.pickups.group);
+
     this.factory = new AircraftFactory({
       anisotropy: this.quality.preset.anisotropy,
       paintTextureSize: this.quality.preset.paintTextureSize,
@@ -212,7 +227,10 @@ export class Game {
       /** Where the nose is pointing on screen, as a percentage of the frame. */
       reticle: this.#projectReticle(),
       ...(this.combat?.telemetry() ?? {}),
+      ...(this.pickups?.telemetry() ?? {}),
       ...(this.aircraft?.telemetry() ?? {}),
+      /** What ended the run, or null while it is still going. */
+      reason: this.reason ?? null,
     };
   }
 
@@ -244,6 +262,10 @@ export class Game {
   start() {
     this.aircraft.reset();
     this.combat?.reset();
+    // A run starts clean: no coins from the last one, no fuel carried over, and no
+    // power-up still ticking.
+    this.pickups?.reset();
+    this.reason = null;
     this.cameraRig.snap(this.aircraft);
     this.accumulator = 0;
     if (!this.state.set(STATES.FLYING)) return false;
@@ -299,6 +321,8 @@ export class Game {
     this.state.set(STATES.MENU);
     this.aircraft.reset();
     this.combat?.reset();
+    this.pickups?.reset();
+    this.reason = null;
     this.cameraRig.snap(this.aircraft);
     this.#run();
     return true;
@@ -385,7 +409,25 @@ export class Game {
     // Flying is the player's aircraft and the fight; the menu backdrop flies itself.
     if (this.state.is(STATES.FLYING)) {
       this.aircraft.update(step, this.input?.read());
+      this.pickups?.update(step, this.aircraft.controller);
+
+      /*
+       * Hand the power-ups to the systems they affect, every step, from the one place that
+       * owns them. The flight model and the gun are *told* what is running rather than
+       * asking, so an effect that has just expired cannot leave either of them loaded for
+       * even one extra step.
+       */
+      const effects = this.pickups?.effects;
+      if (effects) {
+        this.aircraft.controller.speedBoost = effects.speedMultiplier;
+        this.combat?.setSpecialAmmo(effects.damageMultiplier, POWER_UPS.ammo.colour);
+      }
+
       this.combat.update(step, this.aircraft.controller);
+
+      // Out of fuel ends the run, exactly like running out of hull — and exactly once,
+      // because the state machine refuses a second move to RESULTS.
+      if (this.aircraft.controller.fuel <= 0) this.#endRun('fuel');
       return;
     }
 
@@ -400,16 +442,29 @@ export class Game {
   }
 
   /**
-   * The player's aircraft has been destroyed.
+   * End the run, once.
    *
-   * Called once per run, and only from FLYING. `Combat` sets its own `ended` flag before it
-   * emits, and the state machine refuses a second move to RESULTS, so a burst of collisions
-   * arriving in the same frame cannot end the run twice or show two summaries.
+   * The two ways a run can finish — the hull reaching zero and the tank running dry — both
+   * come through here. The state machine refuses a second move to RESULTS and this checks
+   * the state before moving at all, so a burst of collisions in one frame, or a collision
+   * on the same step the tank runs dry, cannot produce two summaries or two game overs.
+   *
+   * @param {'hull'|'fuel'} reason what ended it
+   * @param {object} [payload] whatever the caller knows, merged into the event
+   * @returns {boolean} whether the run actually ended
    */
-  #onDestroyed(payload) {
-    if (!this.state.is(STATES.FLYING)) return;
+  #endRun(reason, payload = {}) {
+    if (!this.state.is(STATES.FLYING)) return false;
+
+    this.reason = reason;
     this.state.set(STATES.RESULTS);
     this.emit('destroyed', { ...payload, ...this.telemetry() });
+    return true;
+  }
+
+  /** The player's aircraft has been destroyed. */
+  #onDestroyed(payload) {
+    this.#endRun('hull', payload);
   }
 
   /**
@@ -479,6 +534,7 @@ export class Game {
     this.clouds?.dispose();
     this.terrain?.dispose();
     this.ridge?.dispose();
+    this.pickups?.dispose();
     this.combat?.dispose();
     this.factory?.dispose();
     this.renderer?.dispose();
