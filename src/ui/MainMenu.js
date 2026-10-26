@@ -19,7 +19,7 @@ export class MainMenu {
     this.#element.innerHTML = `
       <div class="menu-inner">
         <div class="menu-copy">
-          <p class="eyebrow">start.ng · stage 6 prototype</p>
+          <p class="eyebrow">start.ng · stage 7 prototype</p>
           <h1 class="wordmark">SKY <span>COMBAT</span></h1>
           <p class="tagline">Fly, fight and chase the greatest distance.</p>
           <div class="menu-actions">

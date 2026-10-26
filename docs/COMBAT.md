@@ -75,6 +75,11 @@ than hopeful:
    unexplained loss. The acceptance test asserts that one hazard takes about one hazard's
    worth off the hull, not several.
 
+   Since Stage 7 a run can also end on an empty tank. That path goes through `Combat.finish()`
+   — the one door into `#ended` that does not emit a game over of its own — and then into the
+   same `Game.#endRun`, which refuses a second ending. A collision and an empty tank in the
+   same step therefore still produce one summary. See [PICKUPS.md](PICKUPS.md).
+
 ## Spawn safety
 
 `combat/spawn.js` is pure and unit tested, because "enemies must not spawn in unavoidable

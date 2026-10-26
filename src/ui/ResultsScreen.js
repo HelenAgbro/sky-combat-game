@@ -12,6 +12,7 @@
 export class ResultsScreen {
   #element;
   #fields;
+  #title;
 
   constructor(root, { onRestart, onMenu } = {}) {
     this.#element = document.createElement('div');
@@ -25,6 +26,7 @@ export class ResultsScreen {
         <div class="results-grid">
           <div class="result"><span>Distance</span><b data-field="distance">0</b></div>
           <div class="result"><span>Destroyed</span><b data-field="kills">0</b></div>
+          <div class="result"><span>Coins</span><b data-field="coins">0</b></div>
           <div class="result"><span>Score</span><b data-field="score">0</b></div>
           <div class="result"><span>Time</span><b data-field="time">0:00</b></div>
           <div class="result"><span>Shots fired</span><b data-field="shots">0</b></div>
@@ -40,11 +42,14 @@ export class ResultsScreen {
     this.#fields = {
       distance: this.#element.querySelector('[data-field="distance"]'),
       kills: this.#element.querySelector('[data-field="kills"]'),
+      coins: this.#element.querySelector('[data-field="coins"]'),
       score: this.#element.querySelector('[data-field="score"]'),
       time: this.#element.querySelector('[data-field="time"]'),
       shots: this.#element.querySelector('[data-field="shots"]'),
       accuracy: this.#element.querySelector('[data-field="accuracy"]'),
     };
+
+    this.#title = this.#element.querySelector('.results-title');
 
     this.#element.querySelector('[data-action="again"]').addEventListener('click', () => onRestart?.());
     this.#element.querySelector('[data-action="menu"]').addEventListener('click', () => onMenu?.());
@@ -58,11 +63,17 @@ export class ResultsScreen {
 
   /** Fill in a finished run. @param {object} telemetry from `Game.telemetry()` */
   show(telemetry) {
+    // The title says what actually happened. An empty tank is not a destroyed aircraft, and
+    // saying so is the difference between a loss the player understands and one they don't.
+    this.#title.textContent =
+      telemetry.reason === 'fuel' ? 'Out of fuel' : 'Aircraft destroyed';
+
     const metres = telemetry.distance ?? 0;
     this.#fields.distance.textContent =
       metres >= 10000 ? `${(metres / 1000).toFixed(1)} km` : `${Math.round(metres)} m`;
 
     this.#fields.kills.textContent = String(telemetry.kills ?? 0);
+    this.#fields.coins.textContent = String(telemetry.coins ?? 0);
     this.#fields.score.textContent = String(Math.round(telemetry.score ?? 0));
 
     const seconds = Math.max(0, Math.round(telemetry.elapsed ?? 0));

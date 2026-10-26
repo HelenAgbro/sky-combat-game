@@ -68,6 +68,7 @@ export class Projectiles {
         speed: 0,
         age: 0,
         life: 0,
+        scale: 1,
       }),
     });
 
@@ -97,9 +98,11 @@ export class Projectiles {
    * @param {Vector3} direction unit vector
    * @param {number} speed metres per second
    * @param {number} life seconds
+   * @param {number} [scale=1] how much longer the tracer is drawn — special ammunition is
+   *   visibly heavier rather than only being stronger
    * @returns {object|null} the shot, or null when the pool is exhausted
    */
-  fire(origin, direction, speed, life) {
+  fire(origin, direction, speed, life, scale = 1) {
     const shot = this.#pool.acquire();
     if (!shot) return null;
 
@@ -109,7 +112,13 @@ export class Projectiles {
     shot.speed = speed;
     shot.age = 0;
     shot.life = life;
+    shot.scale = scale;
     return shot;
+  }
+
+  /** Recolour the tracers. Used when special ammunition is loaded and unloaded. */
+  setColour(colour) {
+    this.#material.color.set(colour);
   }
 
   release(shot) {
@@ -150,7 +159,9 @@ export class Projectiles {
       if (shot.active) {
         this.#dummy.position.copy(shot.position);
         this.#dummy.quaternion.setFromUnitVectors(AXIS, shot.direction);
-        this.#dummy.scale.set(1, 1, 1);
+        // Length only: a heavier round is drawn longer, not fatter, so the pool's single
+        // geometry still fits every shot.
+        this.#dummy.scale.set(1, 1, shot.scale ?? 1);
       } else {
         this.#dummy.scale.set(0, 0, 0);
       }

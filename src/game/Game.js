@@ -25,6 +25,9 @@ import { PlayerAircraft } from '../aircraft/PlayerAircraft.js';
 import { Combat } from '../combat/Combat.js';
 import { DEFAULT_AIRCRAFT_ID } from '../data/aircraft.js';
 import { DEFAULT_ZONE_ID, getZone } from '../data/zones.js';
+import { Pickups } from '../run/Pickups.js';
+import { RunState } from '../run/RunState.js';
+import { addFuel, isFuelEmpty } from '../run/fuel.js';
 import { CameraController } from '../scene/CameraController.js';
 import { Clouds } from '../scene/Clouds.js';
 import { DistantRidge } from '../scene/DistantRidge.js';
@@ -34,7 +37,7 @@ import { Terrain } from '../scene/Terrain.js';
 import { World } from '../scene/World.js';
 import { ZoneDirector } from '../scene/ZoneDirector.js';
 import { PRESETS, QualityManager, pickTier, readDeviceMetrics } from '../systems/QualityManager.js';
-import { DEMO_FLIGHT, RENDER } from './config.js';
+import { RUN, DEMO_FLIGHT, RENDER } from './config.js';
 import { GameState, STATES } from './GameState.js';
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -166,6 +169,18 @@ export class Game {
     this.scene.add(this.combat.group);
     this.combat.on('destroyed', (payload) => this.#onDestroyed(payload));
 
+    /*
+     * What the run has collected. Coins, fuel and power-ups are placed ahead of the aircraft
+     * on the same recycled-grid principle as the fight, and their flashes borrow the fight's
+     * impact pool rather than owning one — one draw call of feedback for the whole game.
+     */
+    this.run = new RunState();
+    this.pickups = new Pickups({
+      preset: this.quality.preset,
+      flash: (position, options) => this.combat.impacts.spawn(position, options),
+    });
+    this.scene.add(this.pickups.group);
+
     this.factory = new AircraftFactory({
       anisotropy: this.quality.preset.anisotropy,
       paintTextureSize: this.quality.preset.paintTextureSize,
@@ -211,6 +226,17 @@ export class Game {
       controlSurfaces: Boolean(this.aircraft?.surfaces),
       /** Where the nose is pointing on screen, as a percentage of the frame. */
       reticle: this.#projectReticle(),
+      /**
+       * Coins, the power-up slots and the longest countdown, from `RunState`. The slots are
+       * the same objects every frame, so the HUD can read them without anything being
+       * allocated.
+       */
+      ...(this.run?.snapshot() ?? {}),
+      /** What is in the sky, for the tests and the scene budget readout. */
+      coinsInAir: this.pickups?.coinsActive ?? 0,
+      fuelInAir: this.pickups?.fuelActive ?? 0,
+      powerInAir: this.pickups?.powerActive ?? 0,
+      pickupCapacity: this.pickups?.capacity ?? 0,
       ...(this.combat?.telemetry() ?? {}),
       ...(this.aircraft?.telemetry() ?? {}),
     };
@@ -240,10 +266,14 @@ export class Game {
 
   #reticlePoint = new Vector3();
 
-  /** Begin a flight. */
+  /** Begin a flight. Nothing a previous run collected survives into this one. */
   start() {
     this.aircraft.reset();
     this.combat?.reset();
+    this.run?.reset();
+    this.pickups?.reset();
+    // Belt and braces: the gun is unloaded explicitly rather than by relying on `reset`.
+    this.combat?.setSpecialAmmo(false);
     this.cameraRig.snap(this.aircraft);
     this.accumulator = 0;
     if (!this.state.set(STATES.FLYING)) return false;
@@ -299,6 +329,8 @@ export class Game {
     this.state.set(STATES.MENU);
     this.aircraft.reset();
     this.combat?.reset();
+    this.run?.reset();
+    this.pickups?.reset();
     this.cameraRig.snap(this.aircraft);
     this.#run();
     return true;
@@ -374,6 +406,7 @@ export class Game {
     // A zone transition, if one is running. Nothing happens on an ordinary frame.
     this.zones.update(dt);
     this.combat.updateVisuals(dt, this.camera);
+    this.pickups.updateVisuals(dt, this.camera);
     if (this.cameraOverride) this.cameraOverride(this.camera, this.aircraft);
     else this.cameraRig.update(dt, this.aircraft);
   }
@@ -382,10 +415,10 @@ export class Game {
     // A paused or failed game holds its last state; everything else keeps flying.
     if (this.state.is(STATES.PAUSED, STATES.ERROR)) return;
 
-    // Flying is the player's aircraft and the fight; the menu backdrop flies itself.
+    // Flying is the player's aircraft, the fight and what the run has collected; the menu
+    // backdrop flies itself.
     if (this.state.is(STATES.FLYING)) {
-      this.aircraft.update(step, this.input?.read());
-      this.combat.update(step, this.aircraft.controller);
+      this.#simulateFlight(step);
       return;
     }
 
@@ -400,6 +433,91 @@ export class Game {
   }
 
   /**
+   * One fixed step of a live flight: fly, fight, collect, then let the clocks run.
+   *
+   * The order matters. The aircraft moves first, because everything else reacts to where it
+   * is; the fight runs next, because a hull loss has to end the run before anything is
+   * credited to it; collection comes after that, so a coin is only ever counted for an
+   * aircraft that is still flying.
+   */
+  #simulateFlight(step) {
+    const controller = this.aircraft.controller;
+
+    this.aircraft.update(step, this.input?.read());
+    this.combat.update(step, controller);
+
+    // The hull reaching zero ends the run from inside the fight, which changes the state
+    // half-way through this step. Nothing is left to credit after that.
+    if (!this.state.is(STATES.FLYING)) return;
+
+    this.pickups.update(step, controller);
+    this.#collectPickups(controller);
+    this.run.update(step);
+    this.#applyPowerups();
+
+    // Fuel is the other way a run can end. `#endRun` refuses a second ending, so arriving
+    // here in the same step as a hull loss costs nothing.
+    if (isFuelEmpty(controller.fuel)) this.#endRun('fuel');
+  }
+
+  /** Credit whatever the aircraft has just flown through. */
+  #collectPickups(controller) {
+    const taken = this.pickups.collect(controller);
+
+    if (taken.coins > 0) this.run.addCoins(taken.coins);
+
+    if (taken.fuel > 0) {
+      controller.fuel = addFuel(controller.fuel, taken.fuel);
+      this.emit('refuelled', { fuel: controller.fuel });
+    }
+
+    // One orb, one effect: the orb was released before it was reported, so the same pickup
+    // cannot start the same power-up twice.
+    for (let i = 0; i < taken.power.length; i += 1) this.#startPowerup(taken.power[i]);
+  }
+
+  /** Start or refresh a power-up, and make its effect live immediately. */
+  #startPowerup(id) {
+    const result = this.run.activatePowerup(id);
+    if (result === 'ignored') return;
+
+    this.#applyPowerups();
+    this.emit('powerup', { id, result, remaining: this.run.remaining(id) });
+  }
+
+  /**
+   * Make the world match the power-up timers.
+   *
+   * State is the truth and the effects follow it, every step — nothing is switched on by one
+   * event and off by another. A missed event cannot leave a boost running or the gun loaded,
+   * and a timer that expires mid-frame is reflected in the same frame.
+   */
+  #applyPowerups() {
+    const controller = this.aircraft.controller;
+    controller.speedScale = this.run.isActive('boost') ? RUN.powerups.boostSpeedScale : 1;
+
+    if (this.combat?.setSpecialAmmo(this.run.isActive('special'), RUN.powerups)) {
+      this.emit('ammo', { special: this.combat.specialAmmo });
+    }
+  }
+
+  /**
+   * End the run, once, for any reason.
+   *
+   * @param {string} reason `'fuel'`, or the source the fight reported (`'gunfire'`, ...)
+   * @param {object|null} [detail] extra fields from the fight
+   * @returns {boolean} whether this call ended it
+   */
+  #endRun(reason, detail = null) {
+    if (!this.state.is(STATES.FLYING)) return false;
+    // Stop the fight even when it did not cause this: fuel ends a run the hull never saw.
+    this.combat?.finish();
+    this.state.set(STATES.RESULTS);
+    this.emit('destroyed', { ...(detail ?? {}), ...this.telemetry(), reason });
+    return true;
+  }
+
+  /**
    * The player's aircraft has been destroyed.
    *
    * Called once per run, and only from FLYING. `Combat` sets its own `ended` flag before it
@@ -407,9 +525,7 @@ export class Game {
    * arriving in the same frame cannot end the run twice or show two summaries.
    */
   #onDestroyed(payload) {
-    if (!this.state.is(STATES.FLYING)) return;
-    this.state.set(STATES.RESULTS);
-    this.emit('destroyed', { ...payload, ...this.telemetry() });
+    return this.#endRun(payload?.source ?? 'hull', payload);
   }
 
   /**
@@ -480,6 +596,7 @@ export class Game {
     this.terrain?.dispose();
     this.ridge?.dispose();
     this.combat?.dispose();
+    this.pickups?.dispose();
     this.factory?.dispose();
     this.renderer?.dispose();
     this.listeners.clear();

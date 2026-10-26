@@ -10,6 +10,7 @@
 import { Euler, Quaternion, Vector3 } from 'three';
 import { BOUNDS, FLIGHT } from '../game/config.js';
 import { clamp, headingError, radialDistance } from '../game/math.js';
+import { burnFuel } from '../run/fuel.js';
 
 export const NEUTRAL_INPUT = Object.freeze({
   pitch: 0,
@@ -57,6 +58,12 @@ export class AircraftController {
     this.speed = FLIGHT.cruiseSpeed;
     this.throttle = 0.6;
     this.fuel = 1;
+    /**
+     * A multiplier on the aircraft's speed ceiling, set by the speed-boost power-up and put
+     * back to 1 when it expires or a run starts. It lives here rather than in the run state
+     * because it is a property of the airframe's performance, not of the collection.
+     */
+    this.speedScale = 1;
     this.elapsed = 0;
     this.distance = 0;
     this.input = { ...NEUTRAL_INPUT };
@@ -108,6 +115,8 @@ export class AircraftController {
     this.speed = FLIGHT.cruiseSpeed;
     this.throttle = 0.6;
     this.fuel = 1;
+    // Nothing a power-up did to the airframe survives into the next run.
+    this.speedScale = 1;
     this.elapsed = 0;
     this.distance = 0;
     this.input = { ...NEUTRAL_INPUT };
@@ -129,7 +138,8 @@ export class AircraftController {
     const requested = clamp(input.throttle ?? this.throttle, 0, 1);
     this.throttle += (requested - this.throttle) * Math.min(1, FLIGHT.throttleRate * 2 * dt);
 
-    const ceiling = FLIGHT.maxSpeed * scale.speed * (input.boost ? FLIGHT.boostMultiplier : 1);
+    const ceiling =
+      FLIGHT.maxSpeed * scale.speed * (input.boost ? FLIGHT.boostMultiplier : 1) * this.speedScale;
     const targetSpeed = FLIGHT.minSpeed + (ceiling - FLIGHT.minSpeed) * this.throttle;
     this.speed += (targetSpeed - this.speed) * Math.min(1, FLIGHT.speedResponse * dt);
 
@@ -170,13 +180,9 @@ export class AircraftController {
 
     this.boundary = this.#applyBoundaries(dt, _forward);
 
-    // Fuel burn: idle burns less than full throttle, and boost burns far more.
-    const burn =
-      (FLIGHT.fuelBurnPerSecond *
-        (0.45 + this.throttle * 0.55) *
-        (input.boost ? FLIGHT.boostBurnMultiplier : 1)) /
-      scale.fuel;
-    this.fuel = clamp(this.fuel - burn * dt, 0, 1);
+    // Fuel: opened throttle burns more, boost burns far more, and a thirsty airframe empties
+    // sooner. The rule itself lives in `run/fuel.js`, which is unit tested.
+    this.fuel = burnFuel(this.fuel, dt, input, FLIGHT, scale.fuel);
 
     this.distance += this.speed * dt;
     this.elapsed += dt;

@@ -17,7 +17,7 @@
  *    and nothing after that can fire a second game over.
  */
 import { Group, Vector3 } from 'three';
-import { BOUNDS, COMBAT } from '../game/config.js';
+import { BOUNDS, COMBAT, RUN } from '../game/config.js';
 import { clamp, createSeededRandom } from '../game/math.js';
 import { Enemies } from './Enemies.js';
 import { Impacts } from './Impacts.js';
@@ -31,6 +31,9 @@ const PLAYER_RADIUS = 5;
 
 /** Where shots leave the aircraft, measured from its origin along its own nose. */
 const MUZZLE_FORWARD = 6.5;
+
+/** How the special ammunition is tuned. Defaulted here so `Combat` can be built without it. */
+const POWERUP_TUNING = RUN.powerups;
 
 const _origin = new Vector3();
 const _direction = new Vector3();
@@ -57,6 +60,10 @@ export class Combat {
   #score = 0;
   #shotsFired = 0;
   #hits = 0;
+  /** Special ammunition: more damage, and a tracer you can see the difference with. */
+  #specialAmmo = false;
+  #damageScale = 1;
+  #tracerScale = 1;
 
   constructor({ preset, config = COMBAT, seed = 1337 }) {
     this.#config = config;
@@ -102,6 +109,16 @@ export class Combat {
     return this.#obstacles;
   }
 
+  /** The impact pool, so pickups can flash with the same one draw call. */
+  get impacts() {
+    return this.#impacts;
+  }
+
+  /** True while the heavy rounds power-up is running. */
+  get specialAmmo() {
+    return this.#specialAmmo;
+  }
+
   get hull() {
     return this.#hull;
   }
@@ -131,7 +148,44 @@ export class Combat {
     this.#score = 0;
     this.#shotsFired = 0;
     this.#hits = 0;
+    this.setSpecialAmmo(false);
     this.#obstacles.reset();
+  }
+
+  /**
+   * Load or unload the special ammunition.
+   *
+   * Idempotent: the game sets this from the power-up's state every step rather than on an
+   * event, so a timer that expires mid-frame cannot leave the gun loaded. Returns whether
+   * the state actually changed, which is what the muzzle flash keys off.
+   *
+   * @param {boolean} on
+   * @param {object} [tuning] the `powerups` block of `RUN`
+   */
+  setSpecialAmmo(on, tuning = POWERUP_TUNING) {
+    const next = Boolean(on);
+    if (next === this.#specialAmmo) return false;
+
+    this.#specialAmmo = next;
+    this.#damageScale = next ? (tuning?.specialDamageScale ?? 2.2) : 1;
+    this.#tracerScale = next ? (tuning?.specialTracerScale ?? 1.7) : 1;
+    this.#playerShots.setColour(next ? '#bff0ff' : '#ffd27a');
+    return true;
+  }
+
+  /**
+   * Mark the run over without a game-over of the fight's own.
+   *
+   * Fuel exhaustion ends a run that the hull had nothing to do with, and the fight still has
+   * to stop: this is the one door into `#ended` that does not emit `destroyed`. Idempotent,
+   * so ending a run that has already ended is free.
+   *
+   * @returns {boolean} whether this call ended it
+   */
+  finish() {
+    if (this.#ended) return false;
+    this.#ended = true;
+    return true;
   }
 
   /**
@@ -191,10 +245,25 @@ export class Combat {
     this.#aimFrom(player, MUZZLE_FORWARD, gun.spread);
     // The shot inherits the aircraft's own speed: flying fast makes the gun hit harder,
     // which is both true and satisfying.
-    const shot = this.#playerShots.fire(_origin, _direction, gun.speed + player.speed, gun.lifespan);
+    const shot = this.#playerShots.fire(
+      _origin,
+      _direction,
+      gun.speed + player.speed,
+      gun.lifespan,
+      this.#tracerScale,
+    );
     if (!shot) return;
 
-    this.#impacts.spawn(_origin, { size: 2.2, colour: '#fff0c0', life: 0.08, growth: 0.5 });
+    // The round keeps the power it was fired with, even if the power-up expires while it is
+    // still in the air. Ammunition is loaded at the muzzle, not at the target.
+    shot.damageScale = this.#damageScale;
+
+    this.#impacts.spawn(_origin, {
+      size: this.#specialAmmo ? 3.4 : 2.2,
+      colour: this.#specialAmmo ? '#cdf4ff' : '#fff0c0',
+      life: 0.08,
+      growth: 0.5,
+    });
   }
 
   /** Enemies shoot rarely, and only when the player is close enough to be a threat. */
@@ -269,9 +338,10 @@ export class Combat {
       // else: one shot, one hit.
       const from = shot.previous;
       const to = shot.position;
+      const damage = this.#config.gun.damage * (shot.damageScale ?? 1);
       this.#playerShots.release(shot);
       _point.lerpVectors(from, to, hitT);
-      this.#hitEnemy(hitEnemy, this.#config.gun.damage, _point);
+      this.#hitEnemy(hitEnemy, damage, _point);
     }
   }
 
@@ -407,6 +477,7 @@ export class Combat {
       enemyShots: this.#enemyShots.activeCount,
       impacts: this.#impacts.activeCount,
       ended: this.#ended,
+      specialAmmo: this.#specialAmmo,
     };
   }
 

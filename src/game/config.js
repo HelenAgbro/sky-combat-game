@@ -45,7 +45,7 @@ export const FLIGHT = {
   maxBank: 1.15,
   boostMultiplier: 1.28,
   /** Fuel burn per second at full throttle, as a fraction of a full tank. */
-  fuelBurnPerSecond: 0.0125,
+  fuelBurnPerSecond: 0.009,
   boostBurnMultiplier: 2.4,
   /** The aircraft starts airborne at this altitude. */
   startAltitude: 420,
@@ -234,4 +234,98 @@ export const COMBAT = {
     speed: [0.8, 1.15],
     fireRate: [0.4, 1],
   },
+};
+
+/**
+ * The run's resources: things to fly through and pick up.
+ *
+ * Two rules separate these from the hazards in `COMBAT.obstacles`:
+ *
+ * 1. a collectible is placed *on or near* the flight path on purpose (`minLateralOffset`
+ *    is zero), because it is a reward for flying well rather than something to dodge;
+ * 2. every collectible is worth having, so none of them is ever placed behind the player
+ *    or outside the arena — `chooseSpawnPoint` guarantees both.
+ *
+ * Fuel burn itself lives in `FLIGHT`, because it is part of the flight model; this block
+ * only covers the canisters that put fuel back.
+ */
+export const RUN = {
+  /** Coins: a run of them, laid out in a pattern ahead of the aircraft. */
+  coins: {
+    /** Pennies are pooled too, so there is a hard ceiling on what is on screen. */
+    capacity: 48,
+    firstSpawn: 3.5,
+    /** Seconds between patterns. */
+    interval: 3,
+    /** A pattern is a short line of coins rather than a single one. */
+    patterns: ['line', 'arc', 'slalom'],
+    /** How many coins one pattern holds, inclusive range. */
+    perPattern: [4, 7],
+    /** Metres between coins along the pattern. */
+    spacing: 46,
+    /** Where the middle of the pattern is placed, ahead of the player. */
+    minSpawnDistance: 560,
+    maxSpawnDistance: 1500,
+    /** Coins may sit exactly on the flight line: that is the point of them. */
+    minLateralOffset: 0,
+    maxLateralOffset: 230,
+    /** Altitude relative to the player, as a signed band. */
+    signedAltitude: true,
+    minAltitudeOffset: -70,
+    maxAltitudeOffset: 90,
+    /** Collection radius, in metres. Generous: missing one at 150 m/s is not a skill test. */
+    radius: 10,
+    /** Coins a single one is worth. */
+    value: 1,
+    /** Seconds a coin survives before it is recycled. */
+    lifespan: 40,
+  },
+
+  /** Fuel: scarce, and the only pickup that can save a run rather than improve it. */
+  fuel: {
+    capacity: 8,
+    firstSpawn: 14,
+    interval: 13,
+    minSpawnDistance: 700,
+    maxSpawnDistance: 2200,
+    minLateralOffset: 0,
+    maxLateralOffset: 170,
+    signedAltitude: true,
+    minAltitudeOffset: -60,
+    maxAltitudeOffset: 80,
+    radius: 13,
+    /** What one canister puts back, as a fraction of a full tank. */
+    amount: 0.25,
+    /** Below this fraction the HUD turns amber and warns. */
+    lowWarning: 0.25,
+    lifespan: 45,
+  },
+
+  /** Power-ups: temporary, one slot per effect, and gone when the run ends. */
+  powerups: {
+    capacity: 6,
+    firstSpawn: 20,
+    interval: 24,
+    minSpawnDistance: 650,
+    maxSpawnDistance: 2000,
+    minLateralOffset: 0,
+    maxLateralOffset: 200,
+    signedAltitude: true,
+    minAltitudeOffset: -50,
+    maxAltitudeOffset: 80,
+    radius: 15,
+    lifespan: 45,
+    /** How long each effect lasts, in seconds. */
+    duration: { boost: 12, special: 10 },
+    /** Speed multiplier while the speed boost is running. */
+    boostSpeedScale: 1.3,
+    /** Damage multiplier while the special ammunition is loaded. */
+    specialDamageScale: 2.2,
+    /** How much longer the special tracer is drawn, so the change is visible. */
+    specialTracerScale: 1.7,
+  },
+
+  /** How far behind, or how far away, a collectible is recycled. Shared by all three. */
+  despawnBehind: 900,
+  despawnRange: 3000,
 };

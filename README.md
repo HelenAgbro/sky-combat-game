@@ -4,10 +4,10 @@ A 3D aerial combat arcade game for [start.ng](https://start.ng) — third-person
 jet flight over sweeping scenery, with coins, power-ups, fuel, enemies and a public
 leaderboard ranked on distance.
 
-**Stage 6 status: the fight is in.** You can fly it, the world is continuous, and there are
-enemies to shoot, a gun to shoot them with, and balloons to fly around. Coins, fuel,
-power-ups, the hangar, the shop and the start.ng integration are Stages 7–9 — see
-[Stages](#stages).
+**Stage 7 status: the run has resources.** You can fly it, the world is continuous, there are
+enemies to shoot and balloons to fly around, and now coins to collect, a tank that empties
+and power-ups that run on a clock. The hangar, the shop and the start.ng integration are
+Stages 8–10 — see [Stages](#stages).
 
 > **The aircraft is temporary artwork.** No licensed model is available yet — the obvious
 > sources were checked and none of them has a detailed fighter under a licence this project
@@ -61,13 +61,41 @@ and tethered balloons to fly around. Nothing here models a real air force.
   in the middle of the frame.
 - **Hazards** are balloons drifting in your altitude band. Flying into one bursts it and
   takes a third of your hull.
-- **The run ends** when the hull reaches zero, and the summary reports distance, kills,
-  score, time, shots fired and accuracy.
+- **The run ends** when the hull reaches zero or the tank runs dry, and the summary reports
+  distance, kills, coins, score, time, shots fired and accuracy — with a title that says
+  which of the two happened.
 
 **Nothing is allocated while the fight runs.** Enemies, hazards, shots and hit flashes are
 all fixed pools created at start-up, and a shot or an enemy that is done is handed straight
 back. `docs/COMBAT.md` has the details, including the three rules that make a duplicate score
 event structurally impossible.
+
+## Coins, fuel and power-ups
+
+What the run collects, all of it pooled on the same recycled-grid principle as the fight.
+
+- **Coins** arrive in patterns — a line, a shallow arc, a slalom of four to seven, 46 m
+  apart — centred ahead of the aircraft and allowed to sit *on* the flight line, because
+  they are a reward rather than something to dodge. A coin is released in the same call that
+  credits it, so collecting one twice is structurally impossible rather than merely unlikely.
+- **Fuel** burns faster with the throttle open and far faster on boost: a full tank is about
+  111 s at full throttle and 247 s at idle. It is clamped to `0…1` in both directions, shown
+  as a bar that turns amber below a quarter, and an empty tank ends the run — calling the
+  same "end it once" path a hull loss uses.
+- **Power-ups** fill two slots: a **speed boost** (×1.3 ceiling, 12 s) and **heavy rounds**
+  (×2.2 damage and a visibly longer, colder tracer, 10 s). Collecting the same one again
+  refreshes it to full rather than stacking; different ones run their own clocks. The HUD
+  shows a chip per effect with its countdown, and the chip leaves with the effect because the
+  chip only ever reads the state.
+
+Both canisters and orbs stand under a coloured beacon, so they can be found from the far end
+of their 2.2 km spawn range: amber for fuel, the power-up's own colour for an orb.
+
+Every fixed step the game sets the aircraft and the gun to match the power-up clocks, instead
+of switching effects on from one event and off from another — so a missed event cannot leave
+a boost running or the gun loaded after a run has ended. A new run inherits none of it.
+
+`docs/PICKUPS.md` has the numbers, the pooling budgets and the exact rules.
 
 ## The world
 
@@ -133,13 +161,15 @@ the result.
 ## Testing
 
 ```bash
-npm run test:unit         # 79 pure-logic tests: flight model, state machine, quality tiers,
+npm run test:unit         # 106 pure-logic tests: flight model, state machine, quality tiers,
                           # cloud and island layout, zone blending, collisions, the difficulty
-                          # ramp, spawn placement, enemy patterns, the object pool, assets, data
+                          # ramp, spawn placement, enemy patterns, the object pool, fuel, the
+                          # power-up clocks, coin patterns, pickups, assets, data
 npm run smoke             # opens dist/ in headless Chrome, flies, screenshots, fails on errors
-npm run test:acceptance   # 11 browser checks: framing at six viewport shapes, resize, the WebGL
+npm run test:acceptance   # 12 browser checks: framing at six viewport shapes, resize, the WebGL
                           # failure path, keyboard and touch, pause, smoothness, the scene's
-                          # resource budget, a full zone transition, and the fight
+                          # resource budget, a full zone transition, the fight, and the run's
+                          # coins, fuel and power-ups
 npm test                  # all three
 ```
 
@@ -190,12 +220,14 @@ src/
   aircraft/           AircraftFactory.js, PlayerAircraft.js, AircraftController.js, surfaces.js
   combat/             Combat.js, Enemies.js, Obstacles.js, Projectiles.js, Impacts.js, Pool.js,
                       collisions.js, difficulty.js, motion.js, spawn.js
+  run/                RunState.js, Pickups.js, powerups.js (timers), fuel.js (burn rules),
+                      pickupLayout.js (coin patterns)
   assets/             loft.js, textures.js, mergeStaticParts.js, modelRegistry.js, base64.js,
                       models/Fighter.js
   systems/            QualityManager.js, InputManager.js, controls.js
   ui/                 MainMenu.js, HUD.js, PauseScreen.js, ResultsScreen.js, TouchControls.js,
                       Loading.js, FatalPanel.js, PerfReadout.js
-  data/               aircraft.js, enemies.js, zones.js
+  data/               aircraft.js, enemies.js, zones.js, powerups.js
   styles/             main.css, screens.css, hud.css
 public/               copied verbatim into dist/: startng.json, cover.png, favicon.svg, models/
 assets/               source art (licensed .glb masters) — never shipped
@@ -206,19 +238,17 @@ dist/                 the committed, ready-to-play build
 ```
 
 The layout modules (`cloudLayout.js`, `islandLayout.js`), the zone blend (`zoneBlend.js`), the
-surface angles (`surfaces.js`) and everything under `combat/` that is not a Three.js object are
-deliberately pure — no renderer, no DOM — so the recycling rules, the hash grid, the hinge
-signs, the collision maths, the difficulty ramp and the spawn placement are unit tested in
-plain Node rather than eyeballed.
+surface angles (`surfaces.js`), the fuel rules, the power-up timers, the coin patterns and
+everything under `combat/` that is not a Three.js object are deliberately pure — no renderer,
+no DOM — so the recycling rules, the hash grid, the hinge signs, the collision maths, the
+difficulty ramp, the spawn placement, the burn rate, the pattern shapes and the expiry of a
+buff are unit tested in plain Node rather than eyeballed.
 
-Four documents carry the reasoning: **[docs/PLATFORM.md](docs/PLATFORM.md)** for the start.ng
+Five documents carry the reasoning: **[docs/PLATFORM.md](docs/PLATFORM.md)** for the start.ng
 rules the project is built against, **[docs/ASSETS.md](docs/ASSETS.md)** for how the aircraft
 are modelled and why no `.glb` is shipped, **[docs/SCENERY.md](docs/SCENERY.md)** for the
-continuous world, and **[docs/COMBAT.md](docs/COMBAT.md)** for the fight.
-
-Two documents carry the reasoning behind the structure: **[docs/PLATFORM.md](docs/PLATFORM.md)**
-for the start.ng rules the project is built against, and **[docs/ASSETS.md](docs/ASSETS.md)**
-for how the aircraft are modelled and why no `.glb` file is shipped.
+continuous world, **[docs/COMBAT.md](docs/COMBAT.md)** for the fight, and
+**[docs/PICKUPS.md](docs/PICKUPS.md)** for coins, fuel and power-ups.
 
 ## Stages
 
@@ -229,9 +259,9 @@ for how the aircraft are modelled and why no `.glb` file is shipped.
 | 3 | Flight controls, banking, touch controls, flight area, engine glow | done |
 | 4 | Aircraft assets and visual quality: airframe detail, materials, afterburner, sky, clouds, land, water | done |
 | 5 | Environment generation and scenery zones: distant terrain, kinds, transitions | **done, one zone polished** |
-| 6 | Enemies, projectiles, obstacles and combat | **this build** |
-| 7 | Coins, fuel, power-ups, distance, difficulty | next |
-| 8 | Hangar, unlocks, weapon shop, local progression | |
+| 6 | Enemies, projectiles, obstacles and combat | done |
+| 7 | Coins, fuel, power-ups, distance, difficulty | **this build** |
+| 8 | Hangar, unlocks, weapon shop, local progression | next |
 | 9 | Scenery zones art pass, audio, interface polish, optimisation | |
 | 10 | start.ng identity, profile card, leaderboard, publish | |
 

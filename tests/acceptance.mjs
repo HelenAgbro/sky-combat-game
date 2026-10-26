@@ -911,8 +911,255 @@ async function main() {
 
     await fight.close();
 
+    /*
+     * The run's resources. Coins, fuel and power-ups are driven through the real systems: a
+     * real coin pattern placed by the pickups, a real pass through it by a flying aircraft,
+     * the real fuel burn in the flight model, and the real HUD. What is checked is that a coin
+     * is only ever counted once, that fuel falls and can be put back, that an empty tank ends
+     * the run, that a power-up starts and stops on time, and that starting again leaves none
+     * of it behind.
+     */
+    console.log('\n11. Do coins, fuel and power-ups work, and does a new run forget them?');
+    const resources = await browser.newPage({ viewport: { width: 1024, height: 640 } });
+    await resources.route('https://start.ng/**', (route) => route.abort());
+    await resources.goto(`${base}/`, { waitUntil: 'load' });
+    await resources.waitForFunction(() => window.__sky?.ready, null, { timeout: 60000 });
+    await resources.click('[data-action="start"]');
+    await resources.waitForTimeout(800);
+
+    // A coin, dead ahead on the flight line, flown through for real.
+    const coins = await resources.evaluate(() => {
+      const game = window.__sky.game;
+      const player = game.aircraft.controller;
+      // Clear the fight, so nothing shoots the test aircraft while it is being measured.
+      game.combat.enemies.releaseAll();
+      game.combat.obstacles.releaseAll();
+      game.pickups.releaseAll();
+
+      game.pickups.spawnCoins(player);
+      const coin = game.pickups.coinPool.active[0];
+      if (!coin) return { placed: false };
+
+      // 120 m ahead: about a second of flight at cruise, well outside the collection radius.
+      coin.position.copy(player.position).addScaledVector(player.forward, 120);
+      return { placed: true, before: game.telemetry().coins, inAir: game.pickups.coinsActive };
+    });
+
+    await resources.waitForTimeout(1600);
+    const collected = await resources.evaluate(() => ({
+      coins: window.__sky.telemetry().coins,
+      inAir: window.__sky.game.pickups.coinsActive,
+      hudCoins: document.querySelector('.hud-coins b')?.textContent ?? '',
+    }));
+
+    // And the same coin, offered twice in one step: the second pass must credit nothing.
+    const doubleTake = await resources.evaluate(() => {
+      const game = window.__sky.game;
+      const player = game.aircraft.controller;
+      game.pickups.releaseAll();
+      game.pickups.spawnCoins(player);
+
+      const coin = game.pickups.coinPool.active[0];
+      coin.position.copy(player.position);
+
+      const first = game.pickups.collect(player).coins;
+      const second = game.pickups.collect(player).coins;
+      return { first, second };
+    });
+
+    // Fuel: it burns while flying, and a canister puts it back.
+    const fuelBefore = await resources.evaluate(() => window.__sky.telemetry().fuel);
+    await resources.waitForTimeout(2500);
+    const fuelBurned = await resources.evaluate(() => window.__sky.telemetry().fuel);
+
+    const refuelled = await resources.evaluate(() => {
+      const game = window.__sky.game;
+      const player = game.aircraft.controller;
+      const before = player.fuel;
+
+      const canister = game.pickups.spawnFuel(player);
+      if (!canister) return { placed: false, before };
+      // 40 m ahead, so it is collected within a couple of frames of flying.
+      canister.position.copy(player.position).addScaledVector(player.forward, 40);
+      canister.age = 0;
+      return { placed: true, before };
+    });
+
+    await resources.waitForTimeout(600);
+    const afterRefuel = await resources.evaluate(() => ({
+      fuel: window.__sky.telemetry().fuel,
+      hudFuel: document.querySelector('.hud-fuel b')?.textContent ?? '',
+    }));
+
+    // A power-up: on for its duration, then off, with its chip following it.
+    const powerup = await resources.evaluate(() => {
+      const game = window.__sky.game;
+      const player = game.aircraft.controller;
+      game.pickups.releaseAll();
+      game.run.reset();
+
+      const orb = game.pickups.spawnPower(player, 'boost');
+      if (!orb) return { placed: false };
+      orb.position.copy(player.position).addScaledVector(player.forward, 40);
+      return { placed: true };
+    });
+
+    await resources.waitForTimeout(600);
+    const boosted = await resources.evaluate(() => {
+      const game = window.__sky.game;
+      return {
+        active: game.run.isActive('boost'),
+        speedScale: game.aircraft.controller.speedScale,
+        chip: Boolean(document.querySelector('.hud-power[data-power="boost"]')),
+        chipText: document.querySelector('.hud-power[data-power="boost"] .hud-power-time')?.textContent ?? '',
+        remaining: game.run.remaining('boost'),
+      };
+    });
+
+    // Shorten it to a fraction of a second, and watch it go.
+    await resources.evaluate(() => window.__sky.game.run.activatePowerup('boost', 0.3));
+    await resources.waitForTimeout(900);
+    const expired = await resources.evaluate(() => {
+      const game = window.__sky.game;
+      return {
+        active: game.run.isActive('boost'),
+        speedScale: game.aircraft.controller.speedScale,
+        chip: Boolean(document.querySelector('.hud-power[data-power="boost"]')),
+      };
+    });
+
+    // Heavy rounds load the gun, and unload it when they run out.
+    const ammo = await resources.evaluate(async () => {
+      const game = window.__sky.game;
+      game.run.activatePowerup('special', 0.3);
+      // One frame, so the game has applied the effect to the fight.
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      return {
+        ammo: game.combat.specialAmmo,
+        chip: Boolean(document.querySelector('.hud-power[data-power="special"]')),
+      };
+    });
+    await resources.waitForTimeout(900);
+    const ammoOff = await resources.evaluate(() => ({
+      ammo: window.__sky.game.combat.specialAmmo,
+      chip: Boolean(document.querySelector('.hud-power[data-power="special"]')),
+    }));
+
+    // An empty tank ends the run — and the summary says why.
+    const ranDry = await resources.evaluate(async () => {
+      const game = window.__sky.game;
+      game.combat.enemies.releaseAll();
+      game.aircraft.controller.fuel = 0.0002;
+
+      const started = performance.now();
+      while (game.state.current === 'flying' && performance.now() - started < 4000) {
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      }
+      // A frame for the interface to show the summary.
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      return {
+        state: game.state.current,
+        title: document.querySelector('.results-title')?.textContent ?? '',
+      };
+    });
+
+    // Start again: none of it is inherited.
+    await resources.evaluate(() => window.__sky.game.start());
+    await resources.waitForTimeout(400);
+    const restarted = await resources.evaluate(() => {
+      const game = window.__sky.game;
+      return {
+        state: game.state.current,
+        coins: game.telemetry().coins,
+        fuel: game.telemetry().fuel,
+        powerups: game.run.powerups.filter((slot) => slot.active).length,
+        chips: document.querySelectorAll('.hud-power').length,
+        speedScale: game.aircraft.controller.speedScale,
+        special: game.combat.specialAmmo,
+        hudCoins: document.querySelector('.hud-coins b')?.textContent ?? '',
+      };
+    });
+
+    console.log(
+      `   coin placed: ${coins.placed}   coins ${coins.before} -> ${collected.coins}` +
+        `   HUD "${collected.hudCoins}"   still in the air: ${collected.inAir}`,
+    );
+    console.log(
+      `   the same coin twice: ${doubleTake.first} then ${doubleTake.second}` +
+        `   fuel ${fuelBefore.toFixed(3)} -> ${fuelBurned.toFixed(3)}` +
+        ` -> canister -> ${afterRefuel.fuel.toFixed(3)}   HUD "${afterRefuel.hudFuel}"`,
+    );
+    console.log(
+      `   boost: ${powerup.placed ? 'placed' : 'NOT PLACED'} -> active ${boosted.active}` +
+        ` sc${boosted.speedScale.toFixed(2)} chip "${boosted.chipText}"` +
+        `   after expiry: ${expired.active} sc${expired.speedScale}`,
+    );
+    console.log(
+      `   heavy rounds: ${ammo.ammo} (chip ${ammo.chip}) -> ${ammoOff.ammo} (chip ${ammoOff.chip})` +
+        `   empty tank: ${ranDry.state} "${ranDry.title}"`,
+    );
+    console.log(
+      `   restart: coins ${restarted.coins} fuel ${restarted.fuel.toFixed(2)}` +
+        ` power-ups ${restarted.powerups} chips ${restarted.chips}` +
+        ` sc${restarted.speedScale} ammo ${restarted.special}   HUD "${restarted.hudCoins}"`,
+    );
+
+    if (!coins.placed) problems.push('no coin pattern could be placed to fly through');
+    else {
+      if (coins.inAir < 2) problems.push('a coin pattern was not laid out as a pattern');
+      const gained = collected.coins - coins.before;
+      if (gained <= 0) problems.push('flying through a coin credited nothing');
+      if (gained > 1) problems.push(`flying through one coin credited ${gained} coins`);
+      if (collected.hudCoins !== String(collected.coins)) {
+        problems.push('the HUD coin count is not the run count');
+      }
+    }
+
+    if (doubleTake.first !== 1) problems.push('a coin in reach was not credited');
+    if (doubleTake.second !== 0) problems.push('the same coin was credited twice in one step');
+
+    if (!(fuelBurned < fuelBefore)) problems.push('fuel did not fall while flying');
+    if (!refuelled.placed) problems.push('could not place a fuel canister');
+    else if (!(afterRefuel.fuel > fuelBurned)) problems.push('a fuel canister did not put fuel back');
+    if (afterRefuel.fuel > 1) problems.push('a canister filled the tank past full');
+    if (afterRefuel.hudFuel !== String(Math.round(afterRefuel.fuel * 100))) {
+      problems.push('the HUD fuel readout does not match the tank');
+    }
+
+    if (!powerup.placed) problems.push('could not place a power-up orb');
+    else {
+      if (!boosted.active) problems.push('collecting a boost orb did not start the boost');
+      if (!(boosted.speedScale > 1)) problems.push('the boost did not change the airframe');
+      if (!boosted.chip) problems.push('no HUD chip appeared for the running power-up');
+      if (!(boosted.remaining > 0)) problems.push('the power-up started with no time on it');
+    }
+    if (expired.active) problems.push('the power-up never expired');
+    if (expired.speedScale !== 1) problems.push('the airframe kept the boost after it expired');
+    if (expired.chip) problems.push('the HUD chip outlived the power-up');
+
+    if (!ammo.ammo) problems.push('the special ammunition power-up did not load the gun');
+    if (!ammo.chip) problems.push('no HUD chip appeared for the special ammunition');
+    if (ammoOff.ammo) problems.push('the special ammunition never unloaded');
+    if (ammoOff.chip) problems.push('the special ammunition chip outlived the effect');
+
+    if (ranDry.state !== 'results') problems.push(`an empty tank left the game in "${ranDry.state}"`);
+    if (!/out of fuel/i.test(ranDry.title)) problems.push(`the summary said "${ranDry.title}"`);
+
+    if (restarted.state !== 'flying') problems.push('could not start a second run');
+    if (restarted.coins !== 0) problems.push(`a new run started with ${restarted.coins} coins`);
+    // A full tank, less whatever the four hundred milliseconds since the restart burned.
+    if (!(restarted.fuel > 0.98)) problems.push(`a new run started with ${restarted.fuel} fuel`);
+    if (restarted.powerups !== 0) problems.push('a new run inherited a running power-up');
+    if (restarted.chips !== 0) problems.push('a new run inherited a HUD power-up chip');
+    if (restarted.speedScale !== 1) problems.push('a new run inherited the boost');
+    if (restarted.special) problems.push('a new run started with the gun still loaded');
+
+    await resources.close();
+
     // ---------------------------------------------------------------- teardown
-    console.log('\n11. Does renderer cleanup run cleanly?');
+    console.log('\n12. Does renderer cleanup run cleanly?');
+
+
     const teardown = await browser.newPage({ viewport: { width: 800, height: 600 } });
     const teardownErrors = [];
     teardown.on('pageerror', (error) => teardownErrors.push(error.message));
