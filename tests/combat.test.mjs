@@ -102,11 +102,12 @@ test('the difficulty ramp climbs from the first value to the second and stops', 
   assert.equal(rampBetween([2, 8], 4), 8, 'clamped above');
 
   const start = difficultyAt(0);
-  const middle = difficultyAt(COMBAT.ramp.seconds / 2);
-  const end = difficultyAt(COMBAT.ramp.seconds);
-  const late = difficultyAt(COMBAT.ramp.seconds * 10);
+  const middle = difficultyAt(COMBAT.ramp.grace + COMBAT.ramp.distance / 2);
+  const end = difficultyAt(COMBAT.ramp.grace + COMBAT.ramp.distance);
+  const late = difficultyAt((COMBAT.ramp.grace + COMBAT.ramp.distance) * 10);
 
   assert.equal(start.level, 0);
+  assert.equal(middle.level, 0.5, 'the curve is symmetric about its midpoint');
   assert.equal(end.level, 1);
   assert.equal(late.level, 1, 'the ramp does not keep going');
 
@@ -116,7 +117,60 @@ test('the difficulty ramp climbs from the first value to the second and stops', 
   assert.ok(middle.maxAlive <= end.maxAlive);
   assert.ok(start.speed <= end.speed);
   assert.ok(start.fireRate <= end.fireRate);
+  assert.ok(start.obstacleInterval > end.obstacleInterval, 'hazards arrive sooner too');
   assert.ok(Number.isInteger(end.maxAlive));
+  assert.ok(end.maxAlive <= COMBAT.enemies.hardCap, 'the ramp respects the hard cap');
+});
+
+test('the opening is held flat, so a new player is not dropped in at speed', () => {
+  const opening = difficultyAt(0);
+  const atGrace = difficultyAt(COMBAT.ramp.grace);
+  const justPast = difficultyAt(COMBAT.ramp.grace + 1);
+
+  assert.equal(opening.level, 0);
+  assert.equal(atGrace.level, 0, 'the grace distance is not merely short, it is the easiest setting');
+  assert.equal(opening.spawnInterval, COMBAT.ramp.spawnInterval[0]);
+  assert.equal(opening.fireRate, COMBAT.ramp.fireRate[0]);
+  assert.equal(opening.maxAlive, COMBAT.ramp.maxAlive[0]);
+  assert.equal(opening.obstacleInterval, COMBAT.ramp.obstacleInterval[0]);
+  assert.ok(justPast.level < 0.001, 'leaving the grace is a nudge, not a step');
+});
+
+test('the ramp has no steps in it: every metre is a little harder than the last', () => {
+  const end = COMBAT.ramp.grace + COMBAT.ramp.distance;
+  let previous = difficultyAt(0);
+
+  for (let metres = 20; metres <= end + 2000; metres += 20) {
+    const now = difficultyAt(metres);
+
+    assert.ok(now.level >= previous.level - 1e-12, `the level eased back at ${metres} m`);
+    assert.ok(
+      now.level - previous.level < 0.01,
+      `the level jumped by ${(now.level - previous.level).toFixed(4)} at ${metres} m`,
+    );
+    assert.ok(
+      now.spawnInterval <= previous.spawnInterval + 1e-12,
+      `enemies slowed down at ${metres} m`,
+    );
+    assert.ok(
+      now.obstacleInterval <= previous.obstacleInterval + 1e-12,
+      `hazards slowed down at ${metres} m`,
+    );
+    previous = now;
+  }
+});
+
+test('a degenerate or nonsense ramp still answers a finite, playable setting', () => {
+  // A one-metre ramp: nonsense as tuning, but it must still answer numbers rather than NaN.
+  const degenerate = { ramp: { ...COMBAT.ramp, grace: 0, distance: 0 } };
+  const atStart = difficultyAt(0, degenerate);
+  assert.equal(atStart.level, 0, 'a broken ramp fails easy, not hard');
+  assert.ok(Number.isFinite(atStart.spawnInterval));
+  assert.equal(difficultyAt(1, degenerate).level, 1);
+
+  assert.equal(difficultyAt(Number.NaN).level, 0);
+  assert.equal(difficultyAt(-5000).level, 0);
+  assert.equal(difficultyAt(1e12).level, 1);
 });
 
 

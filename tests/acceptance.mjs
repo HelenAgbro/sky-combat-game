@@ -12,7 +12,13 @@
  *   7. the aircraft moves smoothly on a display faster than the 60 Hz simulation;
  *   8. the cloud field, the land, the water and the moving control surfaces stay inside
  *      their budget — nothing is created or destroyed in flight;
- *   9. renderer cleanup stops the loop and releases its resources without throwing.
+ *   9. a scenery zone transition runs end to end;
+ *  10. the fight works: firing, hits, kills and one collision's worth of damage;
+ *  11. coins, fuel and power-ups work, and a new run forgets them;
+ *  12. the run's lifecycle holds — distance climbs with the aircraft, difficulty follows
+ *      distance, a pause freezes every clock, one run ends once, and a replay starts clean
+ *      while the local record survives it;
+ *  13. renderer cleanup stops the loop and releases its resources without throwing.
  *
  * This is not decoration. Check 1 caught the wingtips leaving the frame on a phone while
  * the camera offset was a fixed distance; check 8 is what would catch a scene that leaks
@@ -25,6 +31,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { serve } from '../tools/serve.mjs';
 import { COMBAT } from '../src/game/config.js';
+import { formatDistance } from '../src/run/distance.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -1156,8 +1163,387 @@ async function main() {
 
     await resources.close();
 
+    /*
+     * The run's lifecycle. Everything here is driven through the real game — the start button,
+     * the state machine, the flight model's own odometer, the fight's ramp, a tank running dry
+     * and the Fly again button — rather than by calling the rules directly. What is checked is
+     * that distance climbs with the aircraft, that difficulty follows distance rather than the
+     * clock, that a pause holds every clock, that one run ends once, and that a replay starts
+     * clean while the local record survives it.
+     */
+    console.log('\n12. Does the run lifecycle hold: distance, difficulty, pause, one ending, a clean replay?');
+    const life = await browser.newPage({ viewport: { width: 1024, height: 640 } });
+    await life.route('https://start.ng/**', (route) => route.abort());
+    await life.goto(`${base}/`, { waitUntil: 'load' });
+    await life.waitForFunction(() => window.__sky?.ready, null, { timeout: 60000 });
+
+    // A fresh page: no record left behind by another check, then boot again so it is read.
+    await life.evaluate(() => localStorage.clear());
+    await life.reload({ waitUntil: 'load' });
+    await life.waitForFunction(() => window.__sky?.ready, null, { timeout: 60000 });
+    await life.click('[data-action="start"]');
+    await life.waitForTimeout(600);
+
+    // (a) Distance climbs with the aircraft, at the rate the aircraft is flying.
+    const sampleDistance = () =>
+      life.evaluate(() => {
+        const game = window.__sky.game;
+        // Clear the fight, so nothing shoots or rams the aircraft being measured.
+        game.combat.enemies.releaseAll();
+        game.combat.obstacles.releaseAll();
+        return {
+          distance: window.__sky.telemetry().distance,
+          speed: game.aircraft.controller.speed,
+          at: performance.now(),
+          hud: document.querySelector('.hud [data-field="distance"]')?.textContent ?? '',
+        };
+      });
+
+    const distanceStart = await sampleDistance();
+    await life.waitForTimeout(2000);
+    const distanceEnd = await sampleDistance();
+
+    /** `'4.3 km'` or `'840 m'` as metres, for comparing the readout with the odometer. */
+    const hudMetres = (text) => {
+      const value = Number.parseFloat(text);
+      if (!Number.isFinite(value)) return Number.NaN;
+      return text.trim().endsWith('km') ? value * 1000 : value;
+    };
+
+    // (b) Difficulty follows distance, not the clock.
+    const difficultyOpening = await life.evaluate(() => window.__sky.telemetry().difficulty);
+    const difficultyRamp = await life.evaluate(async () => {
+      const game = window.__sky.game;
+      // Half-way up the ramp after a few seconds of flying: only distance can explain it.
+      game.aircraft.controller.distance = 1200 + 12000 / 2;
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      return {
+        level: window.__sky.telemetry().difficulty,
+        elapsed: game.aircraft.controller.elapsed,
+      };
+    });
+    // Put it back, so the ending below is measured from a known place.
+    await life.evaluate(() => {
+      window.__sky.game.aircraft.controller.distance = 0;
+    });
+
+    // (c) A pause holds every clock, not just the position.
+    const pauseCheck = await life.evaluate(async () => {
+      const game = window.__sky.game;
+      game.run.activatePowerup('boost', 5);
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+
+      const sample = () => ({
+        state: game.state.current,
+        distance: game.telemetry().distance,
+        fuel: game.telemetry().fuel,
+        elapsed: game.aircraft.controller.elapsed,
+        boost: game.run.remaining('boost'),
+        enemies: game.combat.telemetry().enemies,
+      });
+
+      const paused = game.pause();
+      const before = sample();
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      const after = sample();
+      game.resume();
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      const resumed = sample();
+      return { paused, before, after, resumed };
+    });
+
+    // (d) One run, one ending — even when the tank empties on the same step as a collision.
+    const ending = await life.evaluate(async () => {
+      const game = window.__sky.game;
+      const baseline = game.listeners.get('destroyed')?.size ?? 0;
+      let reports = 0;
+      const off = game.on('destroyed', () => {
+        reports += 1;
+      });
+
+      const player = game.aircraft.controller;
+      game.combat.enemies.releaseAll();
+      game.combat.obstacles.releaseAll();
+      game.pickups.releaseAll();
+      game.run.addCoins(7);
+      game.run.activatePowerup('boost', 30); // an effect that must not outlive the run
+      player.distance = 4321;
+      player.fuel = 0.0001;
+
+      // A hazard dropped on the aircraft in the same step, to try to end the run twice.
+      const hazard = game.combat.obstacles.spawn(player);
+      if (hazard) {
+        hazard.position.copy(player.position);
+        hazard.anchorY = hazard.position.y;
+      }
+
+      const started = performance.now();
+      while (game.state.current === 'flying' && performance.now() - started < 4000) {
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      }
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+
+      const reported = window.__sky.telemetry();
+      const stopped = {
+        distance: reported.distance,
+        enemies: reported.enemies,
+        shots: reported.playerShots,
+        elapsed: reported.elapsed,
+      };
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      const later = window.__sky.telemetry();
+      off();
+
+      return {
+        state: game.state.current,
+        baseline,
+        reports,
+        reason: reported.reason,
+        distance: stopped.distance,
+        elapsed: stopped.elapsed,
+        coins: reported.coins,
+        kills: reported.kills,
+        bestDistance: later.bestDistance,
+        newBest: later.newBest,
+        stored: localStorage.getItem('sky-combat.bestDistance.v1'),
+        // The airframe, not telemetry: `speedScale` lives on the controller.
+        boost: player.speedScale,
+        coasted: later.distance,
+        stopped,
+        later,
+        title: document.querySelector('.results-title')?.textContent ?? '',
+        shownDistance: document.querySelector('.results [data-field="distance"]')?.textContent ?? '',
+        shownBest: document.querySelector('.results [data-field="best"]')?.textContent ?? '',
+        shownCoins: document.querySelector('.results [data-field="coins"]')?.textContent ?? '',
+        recordShown: !document.querySelector('.results [data-role="record"]')?.hidden,
+        placeholders: ['hangar', 'shop', 'leaderboard'].map((action) =>
+          Boolean(document.querySelector(`.results [data-action="${action}"]`)?.disabled),
+        ),
+        pauseAfter: game.pause(),
+      };
+    });
+
+    // (e) Fly again: a clean run that keeps the record.
+    await life.click('[data-action="again"]');
+    await life.waitForTimeout(350);
+    const replay = await life.evaluate(() => {
+      const game = window.__sky.game;
+      const telemetry = window.__sky.telemetry();
+      return {
+        state: game.state.current,
+        distance: telemetry.distance,
+        coins: telemetry.coins,
+        kills: telemetry.kills,
+        enemies: game.combat.telemetry().enemies,
+        obstacles: game.combat.telemetry().obstacles,
+        shots: game.combat.telemetry().playerShots + game.combat.telemetry().enemyShots,
+        powerups: game.run.powerups.filter((slot) => slot.active).length,
+        speedScale: game.aircraft.controller.speedScale,
+        special: game.combat.specialAmmo,
+        bestDistance: telemetry.bestDistance,
+        newBest: telemetry.newBest,
+        listeners: game.listeners.get('destroyed')?.size ?? 0,
+        resultsHidden: Boolean(document.querySelector('.results.is-hidden')),
+        hud: document.querySelector('.hud [data-field="distance"]')?.textContent ?? '',
+        hudRecord: Boolean(document.querySelector('.hud-distance.is-record')),
+      };
+    });
+
+    // (f) The record survives a reload, and a worse run does not touch it.
+    await life.reload({ waitUntil: 'load' });
+    await life.waitForFunction(() => window.__sky?.ready, null, { timeout: 60000 });
+    const afterReload = await life.evaluate(() => ({
+      best: window.__sky.telemetry().bestDistance,
+      menuBest: document.querySelector('[data-role="best"]')?.textContent ?? '',
+    }));
+
+    await life.click('[data-action="start"]');
+    await life.waitForTimeout(400);
+    const shorter = await life.evaluate(async () => {
+      const game = window.__sky.game;
+      const player = game.aircraft.controller;
+      game.combat.enemies.releaseAll();
+      game.combat.obstacles.releaseAll();
+      player.distance = 300;
+      player.fuel = 0.0001;
+
+      const started = performance.now();
+      while (game.state.current === 'flying' && performance.now() - started < 4000) {
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      }
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+
+      const telemetry = window.__sky.telemetry();
+      return {
+        best: telemetry.bestDistance,
+        newBest: telemetry.newBest,
+        recordShown: !document.querySelector('.results [data-role="record"]')?.hidden,
+        shownBest: document.querySelector('.results [data-field="best"]')?.textContent ?? '',
+      };
+    });
+
+    const flown = distanceEnd.distance - distanceStart.distance;
+    const seconds = (distanceEnd.at - distanceStart.at) / 1000;
+    const expectedMetres = ((distanceStart.speed + distanceEnd.speed) / 2) * seconds;
+
+    console.log(
+      `   distance: ${distanceStart.distance.toFixed(0)} m -> ${distanceEnd.distance.toFixed(0)} m` +
+        ` in ${seconds.toFixed(2)} s at ~${distanceStart.speed.toFixed(0)} m/s` +
+        ` (expected ~${expectedMetres.toFixed(0)} m)   HUD "${distanceEnd.hud}"`,
+    );
+    console.log(
+      `   difficulty: ${difficultyOpening.toFixed(2)} at the start ->` +
+        ` ${difficultyRamp.level.toFixed(2)} at 7.2 km, after only` +
+        ` ${difficultyRamp.elapsed.toFixed(1)} s of flight`,
+    );
+    console.log(
+      `   pause: ${pauseCheck.paused ? 'held' : 'NOT HELD'}` +
+        `   distance ${pauseCheck.before.distance.toFixed(1)} -> ${pauseCheck.after.distance.toFixed(1)}` +
+        `   fuel ${pauseCheck.before.fuel.toFixed(4)} -> ${pauseCheck.after.fuel.toFixed(4)}` +
+        `   boost ${pauseCheck.before.boost.toFixed(2)} s -> ${pauseCheck.after.boost.toFixed(2)} s` +
+        `   resumed at ${pauseCheck.resumed.state} with ${pauseCheck.resumed.boost.toFixed(2)} s left`,
+    );
+    console.log(
+      `   ending: ${ending.state} after ${ending.reports} report(s), reason "${ending.reason}"` +
+        ` — "${ending.title}"   distance frozen at ${ending.distance.toFixed(0)} m` +
+        ` (coasted to ${ending.coasted.toFixed(0)} m)   coins ${ending.coins}` +
+        `   boost left on: ${ending.boost}`,
+    );
+    console.log(
+      `   record: ${ending.bestDistance} m stored as "${ending.stored}"` +
+        `   panel "${ending.shownDistance}" best "${ending.shownBest}"` +
+        ` new ${ending.recordShown}   placeholders disabled: ${ending.placeholders.join('/')}`,
+    );
+    console.log(
+      `   replay: ${replay.state} at ${replay.distance.toFixed(0)} m, ${replay.coins} coins,` +
+        ` ${replay.kills} kills, ${replay.enemies} enemies, ${replay.shots} shots,` +
+        ` ${replay.powerups} power-ups, boost ×${replay.speedScale}` +
+        `   record kept at ${replay.bestDistance} m   listeners ${replay.listeners}`,
+    );
+    console.log(
+      `   reload: record ${afterReload.best} m, menu "${afterReload.menuBest}"` +
+        `   shorter run: kept ${shorter.best} m, new best ${shorter.newBest},` +
+        ` shown "${shorter.shownBest}"`,
+    );
+
+    if (!(flown > 0)) problems.push('distance did not increase while flying');
+    else if (Math.abs(flown - expectedMetres) > expectedMetres * 0.2) {
+      problems.push(
+        `distance grew by ${flown.toFixed(0)} m in ${seconds.toFixed(2)} s, but the aircraft was` +
+          ` flying at ~${distanceStart.speed.toFixed(0)} m/s (expected ~${expectedMetres.toFixed(0)} m)`,
+      );
+    }
+    if (Math.abs(hudMetres(distanceEnd.hud) - distanceEnd.distance) > 5) {
+      problems.push(`the HUD shows "${distanceEnd.hud}" for ${distanceEnd.distance.toFixed(0)} m`);
+    }
+
+    if (difficultyOpening > 0.02) problems.push(`a run started at difficulty ${difficultyOpening}`);
+    if (!(difficultyRamp.level > 0.45 && difficultyRamp.level < 0.55)) {
+      problems.push(`7.2 km of distance put the ramp at ${difficultyRamp.level}, not half-way`);
+    }
+    if (difficultyRamp.elapsed > 20) {
+      problems.push('the ramp was measured against the clock, not the distance');
+    }
+
+    if (!pauseCheck.paused) problems.push('the game refused to pause while flying');
+    if (pauseCheck.after.state !== 'paused') problems.push('pause did not hold the state');
+    for (const field of ['distance', 'fuel', 'elapsed', 'boost', 'enemies']) {
+      if (pauseCheck.after[field] !== pauseCheck.before[field]) {
+        problems.push(`"${field}" kept moving while paused`);
+      }
+    }
+    if (pauseCheck.resumed.state !== 'flying') problems.push('could not resume after pausing');
+    if (!(pauseCheck.resumed.boost < pauseCheck.before.boost)) {
+      problems.push('the power-up clock did not restart after resuming');
+    }
+
+    if (ending.state !== 'results') problems.push(`the run ended in "${ending.state}"`);
+    if (ending.reports !== 1) problems.push(`one run produced ${ending.reports} game-over reports`);
+    if (ending.reason !== 'fuel') problems.push(`an empty tank reported "${ending.reason}"`);
+    if (!/out of fuel/i.test(ending.title)) problems.push(`the summary said "${ending.title}"`);
+    if (!(ending.distance > 4300)) problems.push(`the run's distance was ${ending.distance}`);
+    if (ending.coasted !== ending.distance) {
+      problems.push(
+        `the distance kept climbing after the run ended (${ending.distance} -> ${ending.coasted})`,
+      );
+    }
+    if (ending.coins !== 7) problems.push(`the summary counted ${ending.coins} coins, not 7`);
+    if (ending.shownCoins !== '7') problems.push(`the panel showed ${ending.shownCoins} coins`);
+    if (ending.boost !== 1) problems.push('the speed boost survived the end of the run');
+    if (ending.pauseAfter) problems.push('a finished run could still be paused');
+    if (ending.stopped.enemies !== ending.later.enemies) {
+      problems.push('the fight kept spawning after the run ended');
+    }
+    if (ending.stopped.shots !== ending.later.playerShots) {
+      problems.push('shots kept flying after the run ended');
+    }
+    if (ending.stopped.elapsed !== ending.later.elapsed) {
+      problems.push('the run clock kept counting after the run ended');
+    }
+
+    if (ending.bestDistance !== Math.round(ending.distance)) {
+      problems.push(`the record is ${ending.bestDistance} m for a ${ending.distance.toFixed(1)} m run`);
+    }
+    if (ending.stored !== String(ending.bestDistance)) {
+      problems.push(`the stored record is "${ending.stored}", not ${ending.bestDistance}`);
+    }
+    if (!ending.newBest) problems.push('the first run of a new browser was not a new record');
+    if (!ending.recordShown) problems.push('the summary did not say the record had fallen');
+    if (ending.shownDistance !== formatDistance(ending.distance)) {
+      problems.push(`the panel showed "${ending.shownDistance}" for ${ending.distance.toFixed(1)} m`);
+    }
+    if (ending.shownBest !== formatDistance(ending.bestDistance)) {
+      problems.push(`the panel showed "${ending.shownBest}" as the best`);
+    }
+    if (ending.placeholders.some((disabled) => !disabled)) {
+      problems.push('the hangar, shop or leaderboard placeholder looks usable');
+    }
+
+    if (replay.state !== 'flying') problems.push(`Fly again left the game in "${replay.state}"`);
+    if (!(replay.distance < 200)) problems.push(`a new run started ${replay.distance} m in`);
+    if (replay.coins !== 0) problems.push(`a new run started with ${replay.coins} coins`);
+    if (replay.kills !== 0) problems.push('a new run inherited kills');
+    if (replay.enemies !== 0) problems.push('a new run started with the old enemies still up');
+    if (replay.obstacles !== 0) problems.push('a new run started with the old hazards still up');
+    if (replay.shots !== 0) problems.push('a new run started with shots still in the air');
+    if (replay.powerups !== 0) problems.push('a new run inherited a running power-up');
+    if (replay.speedScale !== 1) problems.push('a new run inherited the boost');
+    if (replay.special) problems.push('a new run started with the gun loaded');
+    if (replay.bestDistance !== ending.bestDistance) {
+      problems.push(
+        `the record changed from ${ending.bestDistance} to ${replay.bestDistance} on replay`,
+      );
+    }
+    if (replay.newBest) problems.push('a fresh run claimed a new record before flying');
+    if (replay.listeners !== ending.baseline) {
+      problems.push(`replaying added a game-over listener (${ending.baseline} -> ${replay.listeners})`);
+    }
+    if (!replay.resultsHidden) problems.push('the summary stayed up over the new run');
+    if (replay.hudRecord) problems.push('a new run started already past the record');
+    if (Math.abs(hudMetres(replay.hud) - replay.distance) > 5) {
+      problems.push(`the HUD shows "${replay.hud}" ${replay.distance.toFixed(0)} m into a new run`);
+    }
+
+    if (afterReload.best !== ending.bestDistance) {
+      problems.push(`the record did not survive a reload (${afterReload.best})`);
+    }
+    if (afterReload.menuBest !== `Best flight: ${formatDistance(ending.bestDistance)}`) {
+      problems.push(`the menu said "${afterReload.menuBest}"`);
+    }
+    if (shorter.best !== ending.bestDistance) {
+      problems.push(`a worse run changed the record to ${shorter.best}`);
+    }
+    if (shorter.newBest) problems.push('a worse run claimed a new record');
+    if (shorter.recordShown) problems.push('a worse run was announced as a record');
+    if (shorter.shownBest !== formatDistance(ending.bestDistance)) {
+      problems.push(`the panel showed "${shorter.shownBest}" as the best after a worse run`);
+    }
+
+    await life.close();
+
     // ---------------------------------------------------------------- teardown
-    console.log('\n12. Does renderer cleanup run cleanly?');
+    console.log('\n13. Does renderer cleanup run cleanly?');
 
 
     const teardown = await browser.newPage({ viewport: { width: 800, height: 600 } });

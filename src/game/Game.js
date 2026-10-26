@@ -6,8 +6,10 @@
  * once per animation frame. The camera reads the aircraft after the simulation has
  * been stepped, so it never lags a frame behind.
  *
- * Stage 2 flies a scripted demonstration sortie so the scene, the lighting and the
- * camera can be judged. Player input arrives in Stage 3.
+ * A run is the whole of a flight: the menu backdrop, the flight, the pause and the summary.
+ * The rules it follows live in `run/` (distance, fuel, pickups, the local record) and in
+ * `combat/difficulty.js` (the ramp), and never in here; this class is where those rules meet
+ * the loop, the scene and the state machine, and where the run ends exactly once.
  */
 import {
   ACESFilmicToneMapping,
@@ -28,6 +30,7 @@ import { DEFAULT_ZONE_ID, getZone } from '../data/zones.js';
 import { Pickups } from '../run/Pickups.js';
 import { RunState } from '../run/RunState.js';
 import { addFuel, isFuelEmpty } from '../run/fuel.js';
+import { readBestDistance, recordBestDistance, resolveStorage } from '../run/progress.js';
 import { CameraController } from '../scene/CameraController.js';
 import { Clouds } from '../scene/Clouds.js';
 import { DistantRidge } from '../scene/DistantRidge.js';
@@ -58,11 +61,26 @@ export class Game {
   #onVisibility;
   /** Unsubscribes the keyboard pause action. */
   #unsubscribeInput = null;
+  /**
+   * A finished run's numbers, frozen at the moment it ended.
+   *
+   * The wreck keeps flying while the summary is on screen, and so its odometer would keep
+   * climbing; the run's distance is the distance it had when it ended, not the distance the
+   * camera watched afterwards. `null` while no run has ended since the last start.
+   */
+  #summary = null;
 
-  constructor({ canvas, input = null }) {
+  constructor({ canvas, input = null, storage = resolveStorage() }) {
     this.canvas = canvas;
     /** The control source. The menu backdrop flies itself, so this may be absent. */
     this.input = input;
+    /**
+     * Where the local best distance is kept. `null` when the browser has no usable store, in
+     * which case the record simply lives for the session (`src/run/progress.js`).
+     */
+    this.storage = storage;
+    /** The best distance this browser has flown, loaded at boot and banked at every run end. */
+    this.bestDistance = 0;
     this.state = new GameState(STATES.BOOT);
     this.listeners = new Map();
     this.accumulator = 0;
@@ -85,6 +103,10 @@ export class Game {
   /** Build the renderer, the scene and the aircraft. Throws when WebGL is missing. */
   async init() {
     this.state.set(STATES.LOADING);
+
+    // The one thing that survives a reload. Read before anything can start a run, so the menu
+    // can show it and the first run can be compared against it.
+    this.bestDistance = readBestDistance(this.storage);
 
     const metrics = readDeviceMetrics();
     if (!metrics.webgl) {
@@ -239,6 +261,14 @@ export class Game {
       pickupCapacity: this.pickups?.capacity ?? 0,
       ...(this.combat?.telemetry() ?? {}),
       ...(this.aircraft?.telemetry() ?? {}),
+      /*
+       * A finished run's numbers, spread last so they win over the live aircraft's odometer:
+       * the wreck keeps flying while the summary is up, but the run does not keep scoring.
+       */
+      ...(this.#summary ?? {}),
+      /** The local record, and whether the run that just ended beat it. */
+      bestDistance: this.bestDistance,
+      newBest: this.#summary?.newBest ?? false,
     };
   }
 
@@ -268,6 +298,9 @@ export class Game {
 
   /** Begin a flight. Nothing a previous run collected survives into this one. */
   start() {
+    // The previous run's summary is what the results screen showed; a new run starts clean and
+    // the local record is deliberately not part of that (it is the one thing that carries over).
+    this.#summary = null;
     this.aircraft.reset();
     this.combat?.reset();
     this.run?.reset();
@@ -298,9 +331,15 @@ export class Game {
   /**
    * Hold the flight. The scene keeps rendering, which is what makes a pause look
    * like a pause rather than a freeze — and means pause never needs a second loop.
+   *
+   * Only a live flight can be paused. Asking from the menu or the results screen answers
+   * `false` without touching the state machine, so a stray key press cannot print a refused
+   * transition or interrupt a summary the player is reading.
+   *
    * @returns {boolean} whether the state actually changed
    */
   pause() {
+    if (!this.state.is(STATES.FLYING)) return false;
     if (!this.state.set(STATES.PAUSED)) return false;
     this.emit('paused');
     return true;
@@ -326,6 +365,7 @@ export class Game {
   /** Return to the menu, keeping the aircraft flying as a backdrop. */
   toMenu() {
     if (this.state.is(STATES.ERROR)) return false;
+    this.#summary = null;
     this.state.set(STATES.MENU);
     this.aircraft.reset();
     this.combat?.reset();
@@ -504,6 +544,11 @@ export class Game {
   /**
    * End the run, once, for any reason.
    *
+   * The one door out of `FLYING`, so everything that must happen at the end happens here and in
+   * this order: stop the fight, freeze the numbers, stop the effects, move the state, report.
+   * A hull loss and an empty tank both arrive here, and the second call — whichever it is —
+   * is refused by the first line.
+   *
    * @param {string} reason `'fuel'`, or the source the fight reported (`'gunfire'`, ...)
    * @param {object|null} [detail] extra fields from the fight
    * @returns {boolean} whether this call ended it
@@ -512,9 +557,56 @@ export class Game {
     if (!this.state.is(STATES.FLYING)) return false;
     // Stop the fight even when it did not cause this: fuel ends a run the hull never saw.
     this.combat?.finish();
+
+    // Freeze the run before anything else can move — the same fixed step that would carry the
+    // wreck onwards would also carry the odometer and the clocks.
+    this.#summary = this.#freezeRun(reason);
+
+    // The effects end with the run. The clocks are stopped and then applied through the same
+    // state-to-effect path the flight uses, so no boost or loaded gun outlives the aircraft.
+    this.run?.clearPowerups();
+    this.#applyPowerups();
+
     this.state.set(STATES.RESULTS);
-    this.emit('destroyed', { ...(detail ?? {}), ...this.telemetry(), reason });
+    this.emit('destroyed', { ...(detail ?? {}), ...this.telemetry() });
     return true;
+  }
+
+  /**
+   * Take a copy of everything the run earned, and bank the record.
+   *
+   * The summary is the run's own account of itself, not a live reading: distance, time, coins,
+   * kills, score and accuracy are all captured here, once. It is also the only place the local
+   * record is written, so a run can be replayed without ever touching the store twice.
+   *
+   * @param {string} reason
+   * @returns {object} frozen
+   */
+  #freezeRun(reason) {
+    const controller = this.aircraft.controller;
+    const fight = this.combat?.telemetry() ?? {};
+
+    const distance = Math.max(0, controller.distance);
+    const previousBest = this.bestDistance;
+    const bestDistance = recordBestDistance(this.storage, distance, previousBest);
+    const newBest = bestDistance > previousBest;
+    this.bestDistance = bestDistance;
+
+    return Object.freeze({
+      reason,
+      distance,
+      elapsed: controller.elapsed,
+      coins: this.run?.coins ?? 0,
+      kills: fight.kills ?? 0,
+      score: fight.score ?? 0,
+      shotsFired: fight.shotsFired ?? 0,
+      shotsHit: fight.shotsHit ?? 0,
+      accuracy: fight.accuracy ?? 0,
+      hull: fight.hull ?? 0,
+      fuel: controller.fuel,
+      bestDistance,
+      newBest,
+    });
   }
 
   /**

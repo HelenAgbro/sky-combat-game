@@ -10,6 +10,7 @@
 import { Euler, Quaternion, Vector3 } from 'three';
 import { BOUNDS, FLIGHT } from '../game/config.js';
 import { clamp, headingError, radialDistance } from '../game/math.js';
+import { advanceDistance } from '../run/distance.js';
 import { burnFuel } from '../run/fuel.js';
 
 export const NEUTRAL_INPUT = Object.freeze({
@@ -184,7 +185,9 @@ export class AircraftController {
     // sooner. The rule itself lives in `run/fuel.js`, which is unit tested.
     this.fuel = burnFuel(this.fuel, dt, input, FLIGHT, scale.fuel);
 
-    this.distance += this.speed * dt;
+    // The odometer. One rule, shared with the tests and the results screen; it advances on the
+    // fixed simulation step, so a second of flight covers the same ground at 30 fps as at 240.
+    this.distance = advanceDistance(this.distance, this.speed, dt);
     this.elapsed += dt;
   }
 

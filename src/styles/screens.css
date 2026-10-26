@@ -117,6 +117,20 @@
   font-weight: 600;
 }
 
+/* The distance to beat, said before the flight rather than after it. */
+.menu-best {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.menu-best.is-record {
+  color: #f2cf7a;
+}
+
 .menu-note {
   margin-top: 10px;
   max-width: 52ch;
@@ -174,6 +188,25 @@
   letter-spacing: -0.01em;
 }
 
+/* The one celebratory line in the game: it only appears when there is something to celebrate. */
+.results-record {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(216, 253, 113, 0.14);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+/* `display: inline-block` above would otherwise beat the browser's own `[hidden]` rule. */
+.results-record[hidden] {
+  display: none;
+}
+
 .results-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -212,6 +245,24 @@
   justify-content: center;
   gap: 12px;
   margin-top: 26px;
+}
+
+/* Placeholders sit on their own quieter row: what is live and what is not should be obvious. */
+.results-actions-secondary {
+  margin-top: 14px;
+  gap: 10px;
+}
+
+.results-actions-secondary .btn {
+  padding: 9px 20px;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.results-note {
+  margin-top: 16px;
+  font-size: 12px;
 }
 
 @media (max-width: 620px) {

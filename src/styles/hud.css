@@ -152,6 +152,11 @@
   color: #f2cf7a;
 }
 
+/* Past the local record, the distance earns the accent colour. */
+.hud-distance.is-record b {
+  color: var(--accent);
+}
+
 /* A flash on the counter when a coin lands. Short and small: a coin is a tick, not an event. */
 .hud-coins.is-pulse b {
   animation: hud-coin-pop 0.3s ease-out;

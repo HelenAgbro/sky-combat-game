@@ -120,10 +120,20 @@ hundred draw calls.
 
 ## The difficulty ramp
 
-`combat/difficulty.js` is pure: elapsed seconds in, difficulty out. Every value is interpolated
+`combat/difficulty.js` is pure: metres flown in, difficulty out. Every value is interpolated
 between two numbers in `COMBAT.ramp`, so tuning the fight is editing two values rather than
-hunting for a rule. Over 150 seconds the spawn interval falls from 8 s to 2.8 s, the enemy
-ceiling rises from 2 to 6, they fly 44% faster and shoot 2.5× as often.
+hunting for a rule.
+
+The ramp runs on **distance, not on the clock**, and that is the point: a run that circles for a
+minute has not earned a harder sky, and the number driving the fight is the same number the
+results screen reports. The first **1 200 m** hold the easiest setting flat, then every value is
+**eased** (smoothstep) from its first to its second over the next **12 000 m** — enemies arrive
+every 8 s at the start and every 2.8 s at the top, the ceiling rises from 2 to 6 alive, they fly
+44% faster and shoot 2.5× as often, and balloons fall from one every 3.4 s to one every 2.2 s.
+The easing is what keeps it fair: a linear ramp joins the opening with a step and reaches its
+hardest setting at full speed, while a smoothstep is flat at both ends, so no metre is
+meaningfully harder than the one before it. `docs/RUN.md` has the curve, the numbers and the
+tests that hold it in place.
 
 ## What is deliberately absent
 

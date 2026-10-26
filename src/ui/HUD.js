@@ -12,6 +12,7 @@
  */
 import { getPowerup } from '../data/powerups.js';
 import { RUN } from '../game/config.js';
+import { formatDistance } from '../run/distance.js';
 
 export class HUD {
   #element;
@@ -35,7 +36,7 @@ export class HUD {
       <div class="hud-readout">
         <div class="hud-item"><span>Speed</span><b data-field="speed">0</b><i>km/h</i></div>
         <div class="hud-item"><span>Altitude</span><b data-field="altitude">0</b><i>m</i></div>
-        <div class="hud-item"><span>Distance</span><b data-field="distance">0</b><i>m</i></div>
+        <div class="hud-item hud-distance" data-role="distance"><span>Distance</span><b data-field="distance">0 m</b></div>
         <div class="hud-item hud-coins" data-role="coins"><span>Coins</span><b data-field="coins">0</b><i>collected</i></div>
         <div class="hud-item"><span>Kills</span><b data-field="kills">0</b><i>score</i></div>
         <div class="hud-item hud-hull"><span>Hull</span><b data-field="hull">100</b><i>%</i></div>
@@ -67,11 +68,13 @@ export class HUD {
     this.#fuelBar = this.#element.querySelector('[data-role="fuel"]');
     this.#fuelFill = this.#element.querySelector('[data-role="fuel-fill"]');
     this.#powers = this.#element.querySelector('[data-role="powers"]');
+    this.#distanceItem = this.#element.querySelector('[data-role="distance"]');
     this.#coinPulseTarget = this.#element.querySelector('[data-role="coins"]');
     root.append(this.#element);
   }
 
   #coinPulseTarget;
+  #distanceItem;
 
 
   #set(field, value) {
@@ -85,8 +88,17 @@ export class HUD {
     this.#set('speed', Math.round(telemetry.speed * 3.6).toString());
     this.#set('altitude', Math.round(telemetry.altitude).toString());
 
-    const metres = Math.round(telemetry.distance);
-    this.#set('distance', metres >= 10000 ? `${(metres / 1000).toFixed(1)} km` : `${metres}`);
+    const metres = telemetry.distance ?? 0;
+    this.#set('distance', formatDistance(metres));
+
+    // Past the local record, the number turns into the accent colour: the one moment in a run
+    // where a glance at the readout means something beyond "how far have I got".
+    const record = (telemetry.bestDistance ?? 0) > 0 && metres > telemetry.bestDistance;
+    if (this.#last.record !== record) {
+      this.#last.record = record;
+      this.#distanceItem.classList.toggle('is-record', record);
+    }
+
     this.#set('kills', String(telemetry.kills ?? 0));
 
     const coins = String(telemetry.coins ?? 0);

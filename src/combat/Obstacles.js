@@ -183,13 +183,22 @@ export class Obstacles {
   /**
    * Place new hazards on a timer, bob the live ones, and recycle the ones behind.
    *
+   * The cadence is handed in by the fight rather than read from config, because it is part of
+   * the run's difficulty ramp: the same rule that makes enemies arrive sooner makes hazards
+   * arrive sooner, and there is no second timer to keep in step.
+   *
    * @param {number} dt seconds
    * @param {{position:object, forward:object, right:object}} player
+   * @param {number} spawnInterval seconds between placements
    */
-  update(dt, player) {
+  update(dt, player, spawnInterval) {
     this.#timer -= dt;
     if (this.#timer <= 0) {
-      this.#timer = this.#config.interval;
+      // A ramp value of zero would place a balloon a frame; a missing one waits the opening
+      // interval again rather than guessing at a cadence.
+      this.#timer = Number.isFinite(spawnInterval) && spawnInterval > 0
+        ? spawnInterval
+        : this.#config.firstSpawn;
       this.spawn(player);
     }
 

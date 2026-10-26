@@ -55,6 +55,8 @@ export class Combat {
   #cooldown = 0;
   #grace = 0;
   #ended = false;
+  /** 0–1: where the run is on the difficulty ramp. Reported, never used twice. */
+  #level = 0;
   #hull = 0;
   #kills = 0;
   #score = 0;
@@ -143,6 +145,7 @@ export class Combat {
     this.#cooldown = 0;
     this.#grace = 0;
     this.#ended = false;
+    this.#level = 0;
     this.#hull = this.#config.hull.max;
     this.#kills = 0;
     this.#score = 0;
@@ -202,7 +205,13 @@ export class Combat {
       return;
     }
 
-    const difficulty = difficultyAt(player.elapsed, this.#config);
+    /*
+     * Difficulty is read from the distance the aircraft has actually covered, not from the
+     * clock. `player.distance` is the same odometer the results screen reports, so the fight
+     * and the scoreboard can never disagree about how far the run has got.
+     */
+    const difficulty = difficultyAt(player.distance, this.#config);
+    this.#level = difficulty.level;
     if (this.#grace > 0) this.#grace = Math.max(0, this.#grace - dt);
 
     // Spawn.
@@ -213,7 +222,7 @@ export class Combat {
     }
 
     this.#enemies.update(dt, player, difficulty.speed);
-    this.#obstacles.update(dt, player);
+    this.#obstacles.update(dt, player, difficulty.obstacleInterval);
 
     this.#firePlayerGun(dt, player);
     this.#fireEnemyGuns(dt, player, difficulty);
@@ -462,6 +471,8 @@ export class Combat {
   /** Everything the HUD and the results screen read. */
   telemetry() {
     return {
+      /** How far up the difficulty ramp the run is, 0–1. */
+      difficulty: this.#level,
       hull: this.#hull,
       hullMax: this.#config.hull.max,
       kills: this.#kills,

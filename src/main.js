@@ -132,15 +132,19 @@ async function boot() {
 
     menu.setAircraft(game.aircraft.aircraft.name, game.aircraft.source);
     menu.setStatus(`Quality: ${game.tier}`);
+    menu.setBest(game.telemetry().bestDistance);
 
     game.on('frame', (telemetry) => {
       perf.update(telemetry);
       hud.update(telemetry);
     });
 
-    // The end of a run. `Game` emits this once, and the summary is filled from the same
-    // telemetry the HUD was reading a frame earlier.
-    game.on('destroyed', (telemetry) => results.show(telemetry));
+    // The end of a run. `Game` emits this once, with the run's numbers frozen at the moment it
+    // ended, and the summary and the menu's record are both filled from it.
+    game.on('destroyed', (telemetry) => {
+      results.show(telemetry);
+      menu.setBest(telemetry.bestDistance);
+    });
 
     game.state.on(applyScreens);
     applyScreens(game.state.current);

@@ -130,3 +130,14 @@ body {
   outline: 3px solid rgba(216, 253, 113, 0.6);
   outline-offset: 3px;
 }
+
+/* A placeholder is a button that is not ready yet: it must look unpressable, not broken. */
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn:disabled:hover,
+.btn:disabled:active {
+  transform: none;
+}

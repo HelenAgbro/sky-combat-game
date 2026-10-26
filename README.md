@@ -4,10 +4,12 @@ A 3D aerial combat arcade game for [start.ng](https://start.ng) — third-person
 jet flight over sweeping scenery, with coins, power-ups, fuel, enemies and a public
 leaderboard ranked on distance.
 
-**Stage 7 status: the run has resources.** You can fly it, the world is continuous, there are
-enemies to shoot and balloons to fly around, and now coins to collect, a tank that empties
-and power-ups that run on a clock. The hangar, the shop and the start.ng integration are
-Stages 8–10 — see [Stages](#stages).
+**Stage 7 status: the run is complete.** You can fly it, the world is continuous, there are
+enemies to shoot and balloons to fly around, coins to collect, a tank that empties, power-ups
+that run on a clock — and a full run lifecycle: distance that is scored, a fight that gets
+harder with the distance you cover, a pause that holds everything, one summary that is shown
+once, and a Fly again that starts clean while your best distance survives it. The hangar, the
+shop and the start.ng integration are Stages 8–10 — see [Stages](#stages).
 
 > **The aircraft is temporary artwork.** No licensed model is available yet — the obvious
 > sources were checked and none of them has a detailed fighter under a licence this project
@@ -62,8 +64,8 @@ and tethered balloons to fly around. Nothing here models a real air force.
 - **Hazards** are balloons drifting in your altitude band. Flying into one bursts it and
   takes a third of your hull.
 - **The run ends** when the hull reaches zero or the tank runs dry, and the summary reports
-  distance, kills, coins, score, time, shots fired and accuracy — with a title that says
-  which of the two happened.
+  distance, your best distance, kills, coins, score, time, shots fired and accuracy — with a
+  title that says which of the two happened.
 
 **Nothing is allocated while the fight runs.** Enemies, hazards, shots and hit flashes are
 all fixed pools created at start-up, and a shot or an enemy that is done is handed straight
@@ -96,6 +98,35 @@ of switching effects on from one event and off from another — so a missed even
 a boost running or the gun loaded after a run has ended. A new run inherits none of it.
 
 `docs/PICKUPS.md` has the numbers, the pooling budgets and the exact rules.
+
+## The run
+
+One flight, from the button to the summary, is a run. `docs/RUN.md` has the whole life of it;
+the short version:
+
+- **States** — menu, flying, paused, results. A tiny state machine allows only the legal moves
+  between them, so a stray key press or a burst of collisions cannot skip a screen or show two
+  summaries.
+- **Distance is the score**, and it is the flight model's own speed integrated on the fixed 60 Hz
+  step: the same second of flight covers the same ground at 30 fps and at 240. The number is
+  frozen the moment the run ends, so it does not creep up while the wreck coasts behind the
+  panel.
+- **The fight gets harder with distance**, not with the clock: the first 1 200 m hold the easiest
+  setting flat, then a smoothstep ramp over 12 km takes enemies from one every 8 s to one every
+  2.8 s, from 2 alive to 6, and balloons from one every 3.4 s to one every 2.2 s. No step in the
+  curve is bigger than the one before it — a unit test walks the ramp in 20 m increments.
+- **Pause freezes everything** — position, fuel, distance, the power-up clocks, the enemies and
+  their shots — while the scene keeps rendering. Resuming does not fast-forward, and pause never
+  creates a second animation loop.
+- **Game over happens once.** Hull loss and an empty tank share one door, which freezes the
+  run's numbers, ends the power-up effects, stops the fight and reports once with a reason
+  (`Out of fuel` or `Aircraft destroyed`). The summary shows distance, your best, enemies
+  defeated, coins, score, time and accuracy; **Fly again** starts clean, keeps the record, and
+  adds no listeners.
+- **Your best distance is kept** in `localStorage`, shown on the menu, in the HUD once you pass
+  it and on the summary, and never lowered. It is per browser — start.ng's shared leaderboard is
+  Stage 10. Hangar, shop and leaderboard buttons are on the summary already, disabled and
+  labelled, so the navigation is in place for the stages that fill it.
 
 ## The world
 
@@ -161,15 +192,16 @@ the result.
 ## Testing
 
 ```bash
-npm run test:unit         # 106 pure-logic tests: flight model, state machine, quality tiers,
-                          # cloud and island layout, zone blending, collisions, the difficulty
+npm run test:unit         # 118 pure-logic tests: flight model, state machine, quality tiers,
+                          # cloud and island layout, zone blending, collisions, the distance
                           # ramp, spawn placement, enemy patterns, the object pool, fuel, the
-                          # power-up clocks, coin patterns, pickups, assets, data
+                          # power-up clocks, coin patterns, pickups, the odometer, the local
+                          # record, assets, data
 npm run smoke             # opens dist/ in headless Chrome, flies, screenshots, fails on errors
-npm run test:acceptance   # 12 browser checks: framing at six viewport shapes, resize, the WebGL
+npm run test:acceptance   # 13 browser checks: framing at six viewport shapes, resize, the WebGL
                           # failure path, keyboard and touch, pause, smoothness, the scene's
-                          # resource budget, a full zone transition, the fight, and the run's
-                          # coins, fuel and power-ups
+                          # resource budget, a full zone transition, the fight, coins/fuel/
+                          # power-ups, and the run lifecycle from distance to replay
 npm test                  # all three
 ```
 
@@ -221,7 +253,8 @@ src/
   combat/             Combat.js, Enemies.js, Obstacles.js, Projectiles.js, Impacts.js, Pool.js,
                       collisions.js, difficulty.js, motion.js, spawn.js
   run/                RunState.js, Pickups.js, powerups.js (timers), fuel.js (burn rules),
-                      pickupLayout.js (coin patterns)
+                      pickupLayout.js (coin patterns), distance.js (the odometer),
+                      progress.js (the local record)
   assets/             loft.js, textures.js, mergeStaticParts.js, modelRegistry.js, base64.js,
                       models/Fighter.js
   systems/            QualityManager.js, InputManager.js, controls.js
@@ -232,23 +265,25 @@ src/
 public/               copied verbatim into dist/: startng.json, cover.png, favicon.svg, models/
 assets/               source art (licensed .glb masters) — never shipped
 tools/                serve, cover, pack-models, check, publish
-tests/                unit, combat, assets, content, controls, smoke, acceptance
-docs/                 PLATFORM.md, ASSETS.md, SCENERY.md, COMBAT.md
+tests/                unit, combat, run, progress, assets, content, controls, smoke, acceptance
+docs/                 PLATFORM.md, ASSETS.md, SCENERY.md, COMBAT.md, PICKUPS.md, RUN.md
 dist/                 the committed, ready-to-play build
 ```
 
 The layout modules (`cloudLayout.js`, `islandLayout.js`), the zone blend (`zoneBlend.js`), the
-surface angles (`surfaces.js`), the fuel rules, the power-up timers, the coin patterns and
-everything under `combat/` that is not a Three.js object are deliberately pure — no renderer,
-no DOM — so the recycling rules, the hash grid, the hinge signs, the collision maths, the
-difficulty ramp, the spawn placement, the burn rate, the pattern shapes and the expiry of a
-buff are unit tested in plain Node rather than eyeballed.
+surface angles (`surfaces.js`), the fuel rules, the power-up timers, the coin patterns, the
+odometer, the local record and everything under `combat/` that is not a Three.js object are
+deliberately pure — no renderer, no DOM — so the recycling rules, the hash grid, the hinge
+signs, the collision maths, the difficulty ramp, the spawn placement, the burn rate, the pattern
+shapes, the expiry of a buff, the distance rule and the record's edge cases are unit tested in
+plain Node rather than eyeballed.
 
-Five documents carry the reasoning: **[docs/PLATFORM.md](docs/PLATFORM.md)** for the start.ng
+Six documents carry the reasoning: **[docs/PLATFORM.md](docs/PLATFORM.md)** for the start.ng
 rules the project is built against, **[docs/ASSETS.md](docs/ASSETS.md)** for how the aircraft
 are modelled and why no `.glb` is shipped, **[docs/SCENERY.md](docs/SCENERY.md)** for the
-continuous world, **[docs/COMBAT.md](docs/COMBAT.md)** for the fight, and
-**[docs/PICKUPS.md](docs/PICKUPS.md)** for coins, fuel and power-ups.
+continuous world, **[docs/COMBAT.md](docs/COMBAT.md)** for the fight,
+**[docs/PICKUPS.md](docs/PICKUPS.md)** for coins, fuel and power-ups, and
+**[docs/RUN.md](docs/RUN.md)** for the run's lifecycle.
 
 ## Stages
 
@@ -260,7 +295,7 @@ continuous world, **[docs/COMBAT.md](docs/COMBAT.md)** for the fight, and
 | 4 | Aircraft assets and visual quality: airframe detail, materials, afterburner, sky, clouds, land, water | done |
 | 5 | Environment generation and scenery zones: distant terrain, kinds, transitions | **done, one zone polished** |
 | 6 | Enemies, projectiles, obstacles and combat | done |
-| 7 | Coins, fuel, power-ups, distance, difficulty | **this build** |
+| 7 | Coins, fuel, power-ups, and the run lifecycle: distance, difficulty, pause, game over, replay | **this build** |
 | 8 | Hangar, unlocks, weapon shop, local progression | next |
 | 9 | Scenery zones art pass, audio, interface polish, optimisation | |
 | 10 | start.ng identity, profile card, leaderboard, publish | |

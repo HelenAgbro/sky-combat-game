@@ -188,10 +188,12 @@ export const COMBAT = {
 
   /** Environmental hazards: tethered balloons the player has to fly around. */
   obstacles: {
-    /** Seconds into a run before the first one appears. */
-    firstSpawn: 6,
-    /** Seconds between placements. */
-    interval: 3.4,
+    /**
+     * Seconds into a run before the first one appears. How often they follow is part of the
+     * difficulty ramp (`ramp.obstacleInterval`) rather than a second number here, so there is
+     * only ever one answer to "how busy is the sky".
+     */
+    firstSpawn: 8,
     minSpawnDistance: 1000,
     maxSpawnDistance: 2800,
     /** Nothing is ever placed dead ahead: a hazard you cannot see is not a hazard. */
@@ -224,15 +226,26 @@ export const COMBAT = {
   },
 
   /**
-   * The difficulty ramp: every value is interpolated from the first number to the
-   * second as the run goes on, over `rampSeconds`.
+   * The difficulty ramp: harder with distance flown, never with the clock.
+   *
+   * The first `grace` metres are the easiest setting held flat, then every number is eased
+   * from the first value to the second over `distance` metres. Easing matters: a linear climb
+   * joins the opening with a step and reaches its hardest setting at full speed, while a
+   * smoothstep starts and ends flat, so no metre is meaningfully harder than the one before it
+   * (`docs/RUN.md` has the curve and the numbers).
    */
   ramp: {
-    seconds: 150,
+    /** Metres of easy opening: what a new player learns the controls against. */
+    grace: 1200,
+    /** Metres over which the ramp then climbs to its hardest setting. */
+    distance: 12000,
+    /** Seconds between enemy arrivals. */
     spawnInterval: [8, 2.8],
     maxAlive: [2, 6],
     speed: [0.8, 1.15],
     fireRate: [0.4, 1],
+    /** Seconds between balloons: the hazards ramp with the fight, not on their own. */
+    obstacleInterval: [3.4, 2.2],
   },
 };
 

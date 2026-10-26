@@ -100,6 +100,17 @@ export class RunState {
     resetPowerups(this.#powerups);
   }
 
+  /**
+   * End the clocks without forgetting the run.
+   *
+   * A run ends with its effects over, but the coins and the kills it earned are the run's
+   * record and have to stay readable for the summary, so this stops the timers and leaves
+   * the wallet alone.
+   */
+  clearPowerups() {
+    resetPowerups(this.#powerups);
+  }
+
   /** A stable view for telemetry. Same objects every call. */
   snapshot() {
     this.#snapshot.coins = this.#coins;
