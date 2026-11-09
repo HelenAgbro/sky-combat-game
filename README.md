@@ -4,12 +4,12 @@ A 3D aerial combat arcade game for [start.ng](https://start.ng) — third-person
 jet flight over sweeping scenery, with coins, power-ups, fuel, enemies and a public
 leaderboard ranked on distance.
 
-**Stage 7 status: the run is complete.** You can fly it, the world is continuous, there are
-enemies to shoot and balloons to fly around, coins to collect, a tank that empties, power-ups
-that run on a clock — and a full run lifecycle: distance that is scored, a fight that gets
-harder with the distance you cover, a pause that holds everything, one summary that is shown
-once, and a Fly again that starts clean while your best distance survives it. The hangar, the
-shop and the start.ng integration are Stages 8–10 — see [Stages](#stages).
+**Stage 8 status: the hangar is open.** You can fly the full run lifecycle from Stage 7 —
+distance that is scored, a fight that gets harder with the distance you cover, a pause that
+holds everything, one summary per run, and a Fly again that starts clean while your best
+distance survives it. Four aircraft now live in the hangar: preview them, unlock the three
+earned ones with coins banked from your runs, and the one you select is the one you fly. The
+weapon shop and the start.ng integration are Stages 8 and 10 — see [Stages](#stages).
 
 > **The aircraft is temporary artwork.** No licensed model is available yet — the obvious
 > sources were checked and none of them has a detailed fighter under a licence this project
@@ -296,7 +296,7 @@ continuous world, **[docs/COMBAT.md](docs/COMBAT.md)** for the fight,
 | 5 | Environment generation and scenery zones: distant terrain, kinds, transitions | **done, one zone polished** |
 | 6 | Enemies, projectiles, obstacles and combat | done |
 | 7 | Coins, fuel, power-ups, and the run lifecycle: distance, difficulty, pause, game over, replay | **this build** |
-| 8 | Hangar, unlocks, weapon shop, local progression | next |
+| 8 | Hangar, unlocks, weapon shop, local progression | **hangar & unlocks done, shop next** |
 | 9 | Scenery zones art pass, audio, interface polish, optimisation | |
 | 10 | start.ng identity, profile card, leaderboard, publish | |
 

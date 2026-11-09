@@ -58,6 +58,8 @@ export class Combat {
   /** 0–1: where the run is on the difficulty ramp. Reported, never used twice. */
   #level = 0;
   #hull = 0;
+  /** Armour scales incoming damage, never the size of the 0–100 integrity bar. */
+  #hullDamageScale = 1;
   #kills = 0;
   #score = 0;
   #shotsFired = 0;
@@ -67,7 +69,7 @@ export class Combat {
   #damageScale = 1;
   #tracerScale = 1;
 
-  constructor({ preset, config = COMBAT, seed = 1337 }) {
+  constructor({ preset, config = COMBAT, seed = 1337, hullDamageScale = 1 }) {
     this.#config = config;
     this.#random = createSeededRandom(seed);
 
@@ -97,6 +99,7 @@ export class Combat {
     );
 
     this.#hull = config.hull.max;
+    this.#hullDamageScale = Number.isFinite(hullDamageScale) && hullDamageScale > 0 ? hullDamageScale : 1;
   }
 
   get group() {
@@ -459,9 +462,10 @@ export class Combat {
     if (this.#ended || this.#grace > 0) return;
 
     this.#grace = this.#config.hull.grace;
-    this.#hull = Math.max(0, this.#hull - amount);
+    const damage = Math.max(0, amount) * this.#hullDamageScale;
+    this.#hull = Math.max(0, this.#hull - damage);
     this.#impacts.spawn(point ?? _point, { size: 5, colour: '#ff8a5a', life: 0.3, growth: 1.8 });
-    this.#emit('damage', { amount, hull: this.#hull, source });
+    this.#emit('damage', { amount: damage, base: amount, hull: this.#hull, source });
 
     if (this.#hull > 0) return;
     this.#ended = true;

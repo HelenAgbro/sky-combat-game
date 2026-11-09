@@ -327,3 +327,222 @@
     font-size: 16px;
   }
 }
+
+/* ------------------------------------------------------------------- hangar */
+
+.hangar {
+  justify-content: flex-start;
+  align-items: stretch;
+  background: linear-gradient(
+      100deg,
+      rgba(4, 8, 16, 0.9) 0%,
+      rgba(4, 8, 16, 0.55) 46%,
+      rgba(4, 8, 16, 0) 72%
+    ),
+    linear-gradient(0deg, rgba(4, 8, 16, 0.6) 0%, rgba(4, 8, 16, 0) 50%);
+  overflow-y: auto;
+}
+
+.hangar-panel {
+  width: min(720px, 100%);
+  padding: 26px 0 30px;
+}
+
+.hangar-title {
+  margin-top: 4px;
+  font-size: 32px;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+}
+
+.hangar-wallet {
+  margin-top: 8px;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.hangar-wallet b {
+  color: var(--accent);
+}
+
+.hangar-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 22px;
+}
+
+/* A card is the whole point of the hangar: swatch, name, ratings, price, action. */
+.aircraft-card {
+  display: flex;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 16px;
+  background: rgba(9, 15, 26, 0.82);
+  backdrop-filter: blur(8px);
+  cursor: pointer;
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+
+.aircraft-card:hover,
+.aircraft-card:focus-visible {
+  transform: translateY(-1px);
+  border-color: var(--edge);
+  outline: none;
+}
+
+.aircraft-card.is-selected {
+  border-color: var(--edge);
+  box-shadow: 0 0 0 1px var(--edge);
+}
+
+.aircraft-card.is-locked .aircraft-card-body {
+  opacity: 0.82;
+}
+
+/* The livery, as a quartered chip: the two colours the airframe is actually painted in. */
+.aircraft-card-swatch {
+  flex: 0 0 auto;
+  width: 46px;
+  height: 46px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.aircraft-card-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.aircraft-card h3 {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+.aircraft-card-selected {
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(216, 253, 113, 0.16);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+.aircraft-card-role {
+  margin-top: 1px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.aircraft-card-tagline {
+  margin-top: 6px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: #c7d1e2;
+}
+
+.aircraft-card-attrs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 14px;
+  margin-top: 10px;
+}
+
+.aircraft-attr {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 6px;
+  align-items: center;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.aircraft-attr span:first-child {
+  width: 44px;
+  color: var(--muted);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.aircraft-attr b {
+  width: 16px;
+  text-align: right;
+  font-weight: 800;
+}
+
+.aircraft-attr-track {
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.aircraft-attr-track i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.aircraft-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.aircraft-card-price {
+  color: #f2cf7a;
+  font-size: 13px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A compact button for the card footer. */
+.btn-small {
+  padding: 8px 16px;
+  font-size: 12.5px;
+}
+
+.btn-small.primary {
+  box-shadow: none;
+}
+
+.hangar-note {
+  margin-top: 18px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.hangar-actions {
+  display: flex;
+  justify-content: flex-start;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+@media (max-width: 620px) {
+  .hangar {
+    justify-content: flex-start;
+    background: linear-gradient(0deg, rgba(4, 8, 16, 0.92) 0%, rgba(4, 8, 16, 0.4) 58%, rgba(4, 8, 16, 0.12) 100%);
+  }
+
+  .hangar-panel {
+    padding-bottom: 24px;
+  }
+
+  .hangar-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

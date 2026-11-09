@@ -12,6 +12,7 @@ import { Game } from './game/Game.js';
 import { STATES } from './game/GameState.js';
 import { InputManager } from './systems/InputManager.js';
 import { FatalPanel } from './ui/FatalPanel.js';
+import { HangarScreen } from './ui/HangarScreen.js';
 import { HUD } from './ui/HUD.js';
 import { Loading } from './ui/Loading.js';
 import { MainMenu } from './ui/MainMenu.js';
@@ -36,6 +37,7 @@ let menu = null;
 let hud = null;
 let pauseScreen = null;
 let results = null;
+let hangar = null;
 let touch = null;
 
 /** The single place that decides what the player can see. */
@@ -43,8 +45,9 @@ function applyScreens(state) {
   const flying = state === STATES.FLYING;
   const paused = state === STATES.PAUSED;
   const finished = state === STATES.RESULTS;
+  const inHangar = state === STATES.HANGAR;
 
-  if (flying || paused || finished) menu?.hide();
+  if (flying || paused || finished || inHangar) menu?.hide();
   else menu?.show();
 
   if (flying || paused) hud?.show();
@@ -52,6 +55,9 @@ function applyScreens(state) {
 
   if (paused) pauseScreen?.show();
   else pauseScreen?.hide();
+
+  if (inHangar) hangar?.show();
+  else hangar?.hide();
 
   if (!finished) results?.hide();
 
@@ -68,6 +74,13 @@ function startFlight() {
 
 function showMenu() {
   game?.toMenu();
+}
+
+/** Open the hangar and draw its current state. */
+function openHangar() {
+  if (!game || !game.openHangar()) return;
+  hangar.render(game.getHangar(), game.telemetry().wallet);
+  menu.setWallet(game.telemetry().wallet);
 }
 
 /** Build the on-screen controls. Called at boot, or on the first real touch. */
@@ -112,7 +125,7 @@ async function boot() {
 
     const wantsTouch = shouldShowTouchControls(params);
 
-    menu = new MainMenu(ui, { onStart: startFlight });
+    menu = new MainMenu(ui, { onStart: startFlight, onHangar: openHangar });
     hud = new HUD(ui, { showKeyHint: !wantsTouch });
     pauseScreen = new PauseScreen(ui, {
       onResume: () => game.resume(),
@@ -125,6 +138,27 @@ async function boot() {
     results = new ResultsScreen(ui, {
       onRestart: () => game.start(),
       onMenu: () => game.toMenu(),
+      onHangar: openHangar,
+    });
+    hangar = new HangarScreen(ui, {
+      onPreview: (id) => game.previewAircraft(id),
+      onSelect: (id) => {
+        if (game.selectAircraft(id)) hangar.render(game.getHangar(), game.telemetry().wallet);
+      },
+      onUnlock: (id) => {
+        if (game.unlockAircraft(id)) {
+          // Unlocking makes it selectable: select it and redraw with the new wallet.
+          game.selectAircraft(id);
+          hangar.render(game.getHangar(), game.telemetry().wallet);
+          menu.setWallet(game.telemetry().wallet);
+        }
+      },
+      onBack: () => {
+        if (game.closeHangar()) {
+          menu.setWallet(game.telemetry().wallet);
+          menu.setAircraft(game.aircraft.aircraft.name, game.aircraft.source);
+        }
+      },
     });
 
     if (wantsTouch) createTouchControls();
@@ -133,6 +167,7 @@ async function boot() {
     menu.setAircraft(game.aircraft.aircraft.name, game.aircraft.source);
     menu.setStatus(`Quality: ${game.tier}`);
     menu.setBest(game.telemetry().bestDistance);
+    menu.setWallet(game.telemetry().wallet);
 
     game.on('frame', (telemetry) => {
       perf.update(telemetry);
@@ -144,6 +179,7 @@ async function boot() {
     game.on('destroyed', (telemetry) => {
       results.show(telemetry);
       menu.setBest(telemetry.bestDistance);
+      menu.setWallet(telemetry.wallet);
     });
 
     game.state.on(applyScreens);
@@ -178,6 +214,11 @@ async function boot() {
         if (game) game.demo = enabled;
       },
       hideMenu: () => menu?.hide(),
+      /** Hangar automation, for tests and tooling. */
+      openHangar,
+      hangar: () => game?.getHangar() ?? [],
+      selectAircraft: (id) => game?.selectAircraft(id) ?? false,
+      unlockAircraft: (id) => game?.unlockAircraft(id) ?? false,
       /** Move to another scenery zone. See docs/SCENERY.md. */
       setZone: (id, options) => game?.setZone(id, options),
       /** Release the renderer, the input listeners and every generated texture. */
@@ -188,6 +229,7 @@ async function boot() {
         hud?.dispose();
         pauseScreen?.dispose();
         results?.dispose();
+        hangar?.dispose();
         menu?.dispose();
         perf.dispose();
       },

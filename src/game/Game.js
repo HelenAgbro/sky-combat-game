@@ -24,13 +24,15 @@ import {
 } from 'three';
 import { AircraftFactory } from '../aircraft/AircraftFactory.js';
 import { PlayerAircraft } from '../aircraft/PlayerAircraft.js';
+import { armourDamageScale } from '../aircraft/AircraftController.js';
 import { Combat } from '../combat/Combat.js';
-import { DEFAULT_AIRCRAFT_ID } from '../data/aircraft.js';
+import { AIRCRAFT, DEFAULT_AIRCRAFT_ID, getAircraft } from '../data/aircraft.js';
 import { DEFAULT_ZONE_ID, getZone } from '../data/zones.js';
 import { Pickups } from '../run/Pickups.js';
 import { RunState } from '../run/RunState.js';
 import { addFuel, isFuelEmpty } from '../run/fuel.js';
 import { readBestDistance, recordBestDistance, resolveStorage } from '../run/progress.js';
+import { Progression } from '../run/progression.js';
 import { CameraController } from '../scene/CameraController.js';
 import { Clouds } from '../scene/Clouds.js';
 import { DistantRidge } from '../scene/DistantRidge.js';
@@ -69,6 +71,10 @@ export class Game {
    * camera watched afterwards. `null` while no run has ended since the last start.
    */
   #summary = null;
+  /** Built airframes by id: one per aircraft, shared by the hangar preview and the flight. */
+  #fleet = new Map();
+  /** Which aircraft id is currently mounted into the scene. */
+  #mountedId = null;
 
   constructor({ canvas, input = null, storage = resolveStorage() }) {
     this.canvas = canvas;
@@ -81,6 +87,9 @@ export class Game {
     this.storage = storage;
     /** The best distance this browser has flown, loaded at boot and banked at every run end. */
     this.bestDistance = 0;
+    /** Persistent wallet, unlocked aircraft and selection. Loaded before anything can fly. */
+    this.progression = new Progression(storage);
+    this.selectedAircraftId = this.progression.selected;
     this.state = new GameState(STATES.BOOT);
     this.listeners = new Map();
     this.accumulator = 0;
@@ -185,9 +194,27 @@ export class Game {
       { preset: this.quality.preset },
     );
 
+    // Build every airframe up front. The hangar previews and the flight share these
+    // players, so switching an aircraft is a scene swap, never a second, per-aircraft
+    // flight system.
+    this.factory = new AircraftFactory({
+      anisotropy: this.quality.preset.anisotropy,
+      paintTextureSize: this.quality.preset.paintTextureSize,
+    });
+    const built = await Promise.all(AIRCRAFT.map((definition) => this.factory.create(definition.id)));
+    for (const { aircraft, group, source, effects } of built) {
+      this.#fleet.set(aircraft.id, new PlayerAircraft({ aircraft, model: group, source, effects }));
+    }
+    this.#mount(this.selectedAircraftId);
+
     // The fight. Everything it owns is pooled, and it runs on the fixed step, so pausing
-    // the game pauses all of it without it knowing anything about pausing.
-    this.combat = new Combat({ preset: this.quality.preset });
+    // the game pauses all of it without it knowing anything about pausing. Armour from the
+    // selected airframe scales the damage each hit does, not the size of the hull bar.
+    const { armour } = this.aircraft.aircraft.attributes;
+    this.combat = new Combat({
+      preset: this.quality.preset,
+      hullDamageScale: armourDamageScale(armour),
+    });
     this.scene.add(this.combat.group);
     this.combat.on('destroyed', (payload) => this.#onDestroyed(payload));
 
@@ -202,14 +229,6 @@ export class Game {
       flash: (position, options) => this.combat.impacts.spawn(position, options),
     });
     this.scene.add(this.pickups.group);
-
-    this.factory = new AircraftFactory({
-      anisotropy: this.quality.preset.anisotropy,
-      paintTextureSize: this.quality.preset.paintTextureSize,
-    });
-    const { aircraft, group, source, effects } = await this.factory.create(DEFAULT_AIRCRAFT_ID);
-    this.aircraft = new PlayerAircraft({ aircraft, model: group, source, effects });
-    this.scene.add(this.aircraft.object3D);
 
     this.cameraRig = new CameraController(this.camera);
     this.cameraRig.snap(this.aircraft);
@@ -269,6 +288,9 @@ export class Game {
       /** The local record, and whether the run that just ended beat it. */
       bestDistance: this.bestDistance,
       newBest: this.#summary?.newBest ?? false,
+      /** Persistent progression, for the menu, the hangar and the summary. */
+      wallet: this.progression?.coins ?? 0,
+      selectedAircraft: this.selectedAircraftId,
     };
   }
 
@@ -296,8 +318,87 @@ export class Game {
 
   #reticlePoint = new Vector3();
 
+  /**
+   * Mount an airframe into the scene.
+   *
+   * All four airframes are built once at init; mounting is a scene swap, never a new flight
+   * system, so the hangar preview and the flight share the same player, camera rig and
+   * controls. A locked aircraft is still previewable—it is only selecting it that is refused.
+   */
+  #mount(id) {
+    const safe = getAircraft(id).id;
+    const next = this.#fleet.get(safe);
+    if (!next) return false;
+
+    const previous = this.aircraft;
+    if (previous && previous !== next && previous.object3D.parent === this.scene) {
+      this.scene.remove(previous.object3D);
+    }
+
+    this.aircraft = next;
+    this.#mountedId = safe;
+    if (next.object3D.parent !== this.scene) this.scene.add(next.object3D);
+    this.cameraRig?.snap(next);
+    return true;
+  }
+
+  /** Show an aircraft in the hangar backdrop. */
+  previewAircraft(id) {
+    return this.#mount(id);
+  }
+
+  /** Select an unlocked aircraft. Returns whether `id` is now selected. */
+  selectAircraft(id) {
+    if (!this.progression.select(id)) return false;
+    this.selectedAircraftId = this.progression.selected;
+    this.#mount(this.selectedAircraftId);
+    return true;
+  }
+
+  /** Spend coins to unlock an aircraft. Returns true when it was newly unlocked. */
+  unlockAircraft(id) {
+    if (!this.progression.unlock(id)) return false;
+    this.#mount(getAircraft(id).id);
+    return true;
+  }
+
+  /** The hangar's own view of the fleet: everything the interface needs to draw. */
+  getHangar() {
+    return AIRCRAFT.map((definition) => ({
+      id: definition.id,
+      name: definition.name,
+      role: definition.role,
+      tagline: definition.tagline,
+      price: definition.price,
+      paint: definition.livery.paint,
+      accent: definition.livery.accent,
+      attributes: { ...definition.attributes },
+      unlocked: this.progression.isUnlocked(definition.id),
+      selected: this.progression.selected === definition.id,
+      source: this.#fleet.get(definition.id)?.source ?? 'procedural',
+    }));
+  }
+
+  /** Enter the hangar, from the menu or from the summary. */
+  openHangar() {
+    if (!this.state.is(STATES.MENU, STATES.RESULTS)) return false;
+    this.#summary = null;
+    this.aircraft?.reset();
+    this.#mount(this.selectedAircraftId);
+    return this.state.set(STATES.HANGAR);
+  }
+
+  /** Leave the hangar for the menu, once more flying the selected aircraft. */
+  closeHangar() {
+    if (!this.state.is(STATES.HANGAR)) return false;
+    this.#mount(this.selectedAircraftId);
+    return this.state.set(STATES.MENU);
+  }
+
   /** Begin a flight. Nothing a previous run collected survives into this one. */
   start() {
+    // Always fly the selected aircraft, even if the hangar left a preview mounted.
+    this.#mount(this.selectedAircraftId);
     // The previous run's summary is what the results screen showed; a new run starts clean and
     // the local record is deliberately not part of that (it is the one thing that carries over).
     this.#summary = null;
@@ -366,6 +467,7 @@ export class Game {
   toMenu() {
     if (this.state.is(STATES.ERROR)) return false;
     this.#summary = null;
+    this.#mount(this.selectedAircraftId);
     this.state.set(STATES.MENU);
     this.aircraft.reset();
     this.combat?.reset();
@@ -592,11 +694,18 @@ export class Game {
     const newBest = bestDistance > previousBest;
     this.bestDistance = bestDistance;
 
+    // The run's coins join the wallet here, the same single place the record is banked, so a
+    // replay never spends the same coins twice. The wallet is frozen with the summary.
+    const coins = this.run?.coins ?? 0;
+    this.progression.addCoins(coins);
+    const wallet = this.progression.coins;
+
     return Object.freeze({
       reason,
       distance,
       elapsed: controller.elapsed,
-      coins: this.run?.coins ?? 0,
+      coins,
+      wallet,
       kills: fight.kills ?? 0,
       score: fight.score ?? 0,
       shotsFired: fight.shotsFired ?? 0,
