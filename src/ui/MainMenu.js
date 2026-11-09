@@ -15,7 +15,7 @@ export class MainMenu {
   #best;
   #wallet;
 
-  constructor(root, { onStart, onHangar } = {}) {
+  constructor(root, { onStart, onHangar, onShop, onSettings } = {}) {
     this.#root = root;
 
     this.#element = document.createElement('div');
@@ -29,6 +29,8 @@ export class MainMenu {
           <div class="menu-actions">
             <button class="btn primary" type="button" data-action="start">Start flight</button>
             <button class="btn ghost" type="button" data-action="hangar">Hangar</button>
+            <button class="btn ghost" type="button" data-action="shop">Shop</button>
+            <button class="btn ghost" type="button" data-action="settings">Settings</button>
             <button class="btn ghost" type="button" data-action="perf">Performance</button>
           </div>
           <p class="menu-status"></p>
@@ -51,6 +53,8 @@ export class MainMenu {
 
     this.#element.querySelector('[data-action="start"]').addEventListener('click', () => onStart?.());
     this.#element.querySelector('[data-action="hangar"]').addEventListener('click', () => onHangar?.());
+    this.#element.querySelector('[data-action="shop"]').addEventListener('click', () => onShop?.());
+    this.#element.querySelector('[data-action="settings"]').addEventListener('click', () => onSettings?.());
     this.#element
       .querySelector('[data-action="perf"]')
       .addEventListener('click', () => this.#element.classList.toggle('show-perf'));

@@ -34,15 +34,20 @@ function memoryStore(initial = {}) {
 
 test('progression parses garbage into a safe empty wallet with the Falcon selected', () => {
   for (const bad of [null, undefined, 17, 'nope', '{}']) {
-    assert.deepEqual(
-      parseProgression(bad),
-      { coins: 0, unlocked: ['falcon'], selected: 'falcon' },
-      String(bad),
-    );
+    const parsed = parseProgression(bad);
+    assert.equal(parsed.coins, 0, String(bad));
+    assert.deepEqual(parsed.unlocked, ['falcon'], String(bad));
+    assert.equal(parsed.selected, 'falcon', String(bad));
+    assert.deepEqual(parsed.weapons.unlocked, ['standard'], String(bad));
+    assert.equal(parsed.weapons.selected, 'standard', String(bad));
   }
 
   const junk = memoryStore({ [PROGRESSION_KEY]: '{{not json' });
-  assert.deepEqual(readProgression(junk), { coins: 0, unlocked: ['falcon'], selected: 'falcon' });
+  const parsed = readProgression(junk);
+  assert.equal(parsed.coins, 0);
+  assert.deepEqual(parsed.unlocked, ['falcon']);
+  assert.equal(parsed.selected, 'falcon');
+  assert.deepEqual(parsed.weapons.unlocked, ['standard']);
 });
 
 test('a hand-edited store is sanitised rather than trusted', () => {

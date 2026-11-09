@@ -39,6 +39,7 @@ export class HUD {
         <div class="hud-item hud-distance" data-role="distance"><span>Distance</span><b data-field="distance">0 m</b></div>
         <div class="hud-item hud-coins" data-role="coins"><span>Coins</span><b data-field="coins">0</b><i>collected</i></div>
         <div class="hud-item"><span>Kills</span><b data-field="kills">0</b><i>score</i></div>
+        <div class="hud-item hud-score"><span>Score</span><b data-field="score">0</b><i>pts</i></div>
         <div class="hud-item hud-hull"><span>Hull</span><b data-field="hull">100</b><i>%</i></div>
         <div class="hud-fuel" data-role="fuel">
           <span>Fuel</span>
@@ -59,6 +60,7 @@ export class HUD {
       distance: this.#element.querySelector('[data-field="distance"]'),
       coins: this.#element.querySelector('[data-field="coins"]'),
       kills: this.#element.querySelector('[data-field="kills"]'),
+      score: this.#element.querySelector('[data-field="score"]'),
       hull: this.#element.querySelector('[data-field="hull"]'),
       fuel: this.#element.querySelector('[data-field="fuel"]'),
     };
@@ -100,6 +102,7 @@ export class HUD {
     }
 
     this.#set('kills', String(telemetry.kills ?? 0));
+    this.#set('score', String(Math.round(telemetry.score ?? 0)));
 
     const coins = String(telemetry.coins ?? 0);
     if (this.#last.coins !== undefined && this.#last.coins !== coins) this.#pulseCoins();

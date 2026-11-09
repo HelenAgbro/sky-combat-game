@@ -27,11 +27,12 @@ import { PlayerAircraft } from '../aircraft/PlayerAircraft.js';
 import { armourDamageScale } from '../aircraft/AircraftController.js';
 import { Combat } from '../combat/Combat.js';
 import { AIRCRAFT, DEFAULT_AIRCRAFT_ID, getAircraft } from '../data/aircraft.js';
+import { WEAPONS, resolveWeapon } from '../data/weapons.js';
 import { DEFAULT_ZONE_ID, getZone } from '../data/zones.js';
 import { Pickups } from '../run/Pickups.js';
 import { RunState } from '../run/RunState.js';
 import { addFuel, isFuelEmpty } from '../run/fuel.js';
-import { readBestDistance, recordBestDistance, resolveStorage } from '../run/progress.js';
+import { readBestDistance, recordBestDistance, resetBestDistance, resolveStorage } from '../run/progress.js';
 import { Progression } from '../run/progression.js';
 import { CameraController } from '../scene/CameraController.js';
 import { Clouds } from '../scene/Clouds.js';
@@ -217,6 +218,7 @@ export class Game {
     });
     this.scene.add(this.combat.group);
     this.combat.on('destroyed', (payload) => this.#onDestroyed(payload));
+    this.#applyWeapon();
 
     /*
      * What the run has collected. Coins, fuel and power-ups are placed ahead of the aircraft
@@ -393,6 +395,106 @@ export class Game {
     if (!this.state.is(STATES.HANGAR)) return false;
     this.#mount(this.selectedAircraftId);
     return this.state.set(STATES.MENU);
+  }
+
+  /** Apply the selected weapon (with its upgrade level) to the fight. */
+  #applyWeapon() {
+    const id = this.progression.weaponSelected;
+    const spec = resolveWeapon(id, this.progression.weaponLevel(id));
+    this.combat?.setWeapon(spec);
+    return spec;
+  }
+
+  /** Equip an owned weapon. Returns whether `id` is now equipped. */
+  selectWeapon(id) {
+    if (!this.progression.selectWeapon(id)) return false;
+    this.#applyWeapon();
+    return true;
+  }
+
+  /** Buy a weapon. A one-time unlock; a newly bought weapon is equipped for you. */
+  unlockWeapon(id) {
+    if (!this.progression.unlockWeapon(id)) return false;
+    this.selectWeapon(id);
+    return true;
+  }
+
+  /** Buy the next upgrade level. Returns true when it upgraded. */
+  upgradeWeapon(id) {
+    if (!this.progression.upgradeWeapon(id)) return false;
+    if (this.progression.weaponSelected === id) this.#applyWeapon();
+    return true;
+  }
+
+  /** The shop's own view of the arsenal: everything the interface must draw. */
+  getShop() {
+    return WEAPONS.map((weapon) => {
+      const level = this.progression.weaponLevel(weapon.id);
+      const unlocked = this.progression.isWeaponUnlocked(weapon.id);
+      const selected = this.progression.weaponSelected === weapon.id;
+      const maxLevel = weapon.levels.length - 1;
+      const atMax = level >= maxLevel;
+      const nextCost = atMax ? null : (unlocked ? weapon.levels[level + 1].cost : weapon.price);
+      return {
+        id: weapon.id,
+        name: weapon.name,
+        description: weapon.description,
+        kind: weapon.kind,
+        colour: weapon.colour,
+        price: weapon.price,
+        level,
+        maxLevel,
+        unlocked,
+        selected,
+        atMax,
+        nextCost,
+        canAfford: nextCost != null && this.progression.coins >= nextCost,
+      };
+    });
+  }
+
+  /** Enter the shop, from the menu or the summary. */
+  openShop() {
+    if (!this.state.is(STATES.MENU, STATES.RESULTS)) return false;
+    this.#summary = null;
+    this.aircraft?.reset();
+    this.#mount(this.selectedAircraftId);
+    return this.state.set(STATES.SHOP);
+  }
+
+  /** Leave the shop for the menu. */
+  closeShop() {
+    if (!this.state.is(STATES.SHOP)) return false;
+    this.#mount(this.selectedAircraftId);
+    return this.state.set(STATES.MENU);
+  }
+
+  /** Open settings. Legal from the menu or from the pause screen. */
+  openSettings() {
+    if (!this.state.is(STATES.MENU, STATES.PAUSED)) return false;
+    return this.state.set(STATES.SETTINGS);
+  }
+
+  /** Leave settings for whatever opened them (menu or pause). */
+  closeSettings() {
+    if (!this.state.is(STATES.SETTINGS)) return false;
+    const target = this.state.previous === STATES.PAUSED ? STATES.PAUSED : STATES.MENU;
+    return this.state.set(target);
+  }
+
+  /**
+   * Development helper: wipe all local progression — the wallet, both sets of unlocks and
+   * selections, and the best distance — back to a first launch.
+   */
+  resetProgression() {
+    this.progression.reset();
+    this.bestDistance = resetBestDistance(this.storage);
+    this.selectedAircraftId = this.progression.selected;
+    this.#mount(this.selectedAircraftId);
+    this.aircraft?.reset();
+    this.cameraRig?.snap(this.aircraft);
+    this.#applyWeapon();
+    return true;
   }
 
   /** Begin a flight. Nothing a previous run collected survives into this one. */
@@ -606,7 +708,10 @@ export class Game {
   #collectPickups(controller) {
     const taken = this.pickups.collect(controller);
 
-    if (taken.coins > 0) this.run.addCoins(taken.coins);
+    if (taken.coins > 0) {
+      this.run.addCoins(taken.coins);
+      this.emit('coin', { coins: taken.coins, total: this.run.coins });
+    }
 
     if (taken.fuel > 0) {
       controller.fuel = addFuel(controller.fuel, taken.fuel);

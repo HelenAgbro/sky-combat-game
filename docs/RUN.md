@@ -164,9 +164,9 @@ number changed.
 
 ## What is deliberately absent
 
-- **The shop and the leaderboard.** The hangar is implemented (Stage 8); the shop and the
-  leaderboard remain two disabled, labelled buttons on the summary, because a placeholder that
-  looks live is worse than one that says it is not ready. They arrive in Stages 8 and 10.
+- **The leaderboard.** The hangar and the weapon shop are implemented (Stage 8); the
+  leaderboard remains a disabled, labelled button on the summary, because a placeholder that
+  looks live is worse than one that says it is not ready. It arrives in Stage 10.
 - **A server-side record.** The best distance is local. start.ng identity and the shared
   leaderboard are Stage 10.
 - **Continues, extra lives, or a score multiplier.** One run, one ending.

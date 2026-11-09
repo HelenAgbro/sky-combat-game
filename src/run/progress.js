@@ -60,6 +60,23 @@ export function readBestDistance(storage = resolveStorage()) {
 }
 
 /**
+ * Wipe the stored record. Development only: it gives a clean-slate reload while the local
+ * progression is being tuned. A refused or missing store costs nothing — the return value is
+ * still the fresh record of zero.
+ *
+ * @param {Storage|null} [storage]
+ * @returns {number} 0
+ */
+export function resetBestDistance(storage = resolveStorage()) {
+  try {
+    storage?.removeItem(BEST_DISTANCE_KEY);
+  } catch {
+    // The session's in-memory record is reset by the caller regardless.
+  }
+  return 0;
+}
+
+/**
  * Whether `metres` beats `best`.
  *
  * Strictly greater, so equalling the record is not a new record, and positive, so a run that

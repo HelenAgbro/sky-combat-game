@@ -13,6 +13,7 @@
  * the price in `data/aircraft.js`, and the stored value is sanitised before it is used.
  */
 import { AIRCRAFT, DEFAULT_AIRCRAFT_ID, getAircraft } from '../data/aircraft.js';
+import { DEFAULT_WEAPON_ID, WEAPON_IDS, getWeapon } from '../data/weapons.js';
 import { resolveStorage } from './progress.js';
 
 export const PROGRESSION_KEY = 'sky-combat.progression.v1';
@@ -42,6 +43,37 @@ export function sanitiseUnlocked(value) {
   return [...ids];
 }
 
+/** Only weapon ids that actually exist are trusted. Anything else reads as the standard gun. */
+export function sanitiseWeaponId(value) {
+  return typeof value === 'string' && WEAPON_IDS.includes(value) ? value : DEFAULT_WEAPON_ID;
+}
+
+/**
+ * Whatever was stored for weapons becomes a safe loadout: the standard gun is always owned,
+ * levels are clamped to each weapon's own range, locked weapons read as level 0, and a
+ * selected weapon that is not owned falls back to the standard gun.
+ */
+export function sanitiseWeapons(value) {
+  const object = value && typeof value === 'object' ? value : {};
+  const unlocked = new Set([DEFAULT_WEAPON_ID]);
+  if (Array.isArray(object.unlocked)) {
+    for (const id of object.unlocked) unlocked.add(sanitiseWeaponId(id));
+  }
+
+  const levels = {};
+  for (const id of WEAPON_IDS) {
+    const max = getWeapon(id).levels.length - 1;
+    const number = Number(object.levels?.[id]);
+    const clamped = Number.isFinite(number) ? Math.min(max, Math.max(0, Math.floor(number))) : 0;
+    levels[id] = unlocked.has(id) ? clamped : 0;
+  }
+
+  let selected = sanitiseWeaponId(object.selected);
+  if (!unlocked.has(selected)) selected = DEFAULT_WEAPON_ID;
+
+  return { unlocked: [...unlocked], levels, selected };
+}
+
 /**
  * Turn whatever was stored into a safe progression snapshot.
  *
@@ -59,7 +91,7 @@ export function parseProgression(raw) {
   const unlocked = sanitiseUnlocked(object.unlocked);
   let selected = sanitiseAircraftId(object.selected);
   if (!unlocked.includes(selected)) selected = DEFAULT_AIRCRAFT_ID;
-  return { coins, unlocked, selected };
+  return { coins, unlocked, selected, weapons: sanitiseWeapons(object.weapons) };
 }
 
 /** Read the persisted progression, or a safe empty one when there is no usable store. */
@@ -82,6 +114,7 @@ export function writeProgression(storage, state) {
         coins: state.coins,
         unlocked: state.unlocked,
         selected: state.selected,
+        weapons: state.weapons,
       }),
     );
   } catch {
@@ -97,8 +130,11 @@ export function writeProgression(storage, state) {
 export class Progression {
   #storage;
   #unlocked = new Set();
+  #weaponsUnlocked = new Set();
   #coins = 0;
   #selected = DEFAULT_AIRCRAFT_ID;
+  #weaponLevels = {};
+  #weaponsSelected = DEFAULT_WEAPON_ID;
 
   constructor(storage = resolveStorage()) {
     this.#storage = storage;
@@ -106,6 +142,9 @@ export class Progression {
     this.#coins = state.coins;
     this.#unlocked = new Set(state.unlocked);
     this.#selected = state.selected;
+    this.#weaponsUnlocked = new Set(state.weapons.unlocked);
+    this.#weaponLevels = state.weapons.levels;
+    this.#weaponsSelected = state.weapons.selected;
   }
 
   get coins() {
@@ -120,14 +159,47 @@ export class Progression {
     return [...this.#unlocked];
   }
 
+  get weaponSelected() {
+    return this.#weaponsSelected;
+  }
+
+  get weaponUnlockedIds() {
+    return [...this.#weaponsUnlocked];
+  }
+
   isUnlocked(id) {
     return this.#unlocked.has(sanitiseAircraftId(id));
+  }
+
+  isWeaponUnlocked(id) {
+    return this.#weaponsUnlocked.has(sanitiseWeaponId(id));
+  }
+
+  weaponLevel(id) {
+    return this.#weaponLevels[sanitiseWeaponId(id)] ?? 0;
   }
 
   /** Whether the wallet covers the price of `id`. */
   canAfford(id) {
     const price = getAircraft(id).price;
     return Number.isFinite(price) && this.#coins >= price;
+  }
+
+  /**
+   * Spend coins if the wallet can cover the cost. Free is always affordable; anything
+   * unreadable is treated as unaffordable rather than silently drained. Returns whether the
+   * deduction happened.
+   *
+   * @param {number} amount
+   * @returns {boolean}
+   */
+  spendCoins(amount) {
+    const cost = Number.isFinite(amount) && amount > 0 ? Math.floor(amount) : 0;
+    if (cost === 0) return true;
+    if (this.#coins < cost) return false;
+    this.#coins -= cost;
+    this.#persist();
+    return true;
   }
 
   /**
@@ -141,9 +213,9 @@ export class Progression {
     if (this.#unlocked.has(safe)) return false;
 
     const price = getAircraft(safe).price;
-    if (!Number.isFinite(price) || price < 0 || this.#coins < price) return false;
+    if (!Number.isFinite(price) || price < 0) return false;
+    if (!this.spendCoins(price)) return false;
 
-    this.#coins -= price;
     this.#unlocked.add(safe);
     this.#persist();
     return true;
@@ -163,6 +235,41 @@ export class Progression {
     return true;
   }
 
+  /** Unlock a weapon (a one-time purchase). Returns true when it was newly unlocked. */
+  unlockWeapon(id) {
+    const safe = sanitiseWeaponId(id);
+    if (this.#weaponsUnlocked.has(safe)) return false;
+    if (!this.spendCoins(getWeapon(safe).price)) return false;
+    this.#weaponsUnlocked.add(safe);
+    this.#weaponLevels[safe] = 0;
+    this.#persist();
+    return true;
+  }
+
+  /** Buy the next upgrade level for an owned weapon. Returns true when it upgraded. */
+  upgradeWeapon(id) {
+    const safe = sanitiseWeaponId(id);
+    if (!this.#weaponsUnlocked.has(safe)) return false;
+
+    const weapon = getWeapon(safe);
+    const level = this.#weaponLevels[safe] ?? 0;
+    if (level >= weapon.levels.length - 1) return false;
+    if (!this.spendCoins(weapon.levels[level + 1].cost)) return false;
+
+    this.#weaponLevels[safe] = level + 1;
+    this.#persist();
+    return true;
+  }
+
+  /** Select an owned weapon. Returns false when it is locked. */
+  selectWeapon(id) {
+    const safe = sanitiseWeaponId(id);
+    if (!this.#weaponsUnlocked.has(safe)) return false;
+    this.#weaponsSelected = safe;
+    this.#persist();
+    return true;
+  }
+
   /** Bank coins from a finished run. Ignores anything that is not a positive integer. */
   addCoins(amount) {
     const value = Number.isFinite(amount) && amount > 0 ? Math.floor(amount) : 0;
@@ -173,7 +280,28 @@ export class Progression {
   }
 
   snapshot() {
-    return { coins: this.#coins, unlocked: [...this.#unlocked], selected: this.#selected };
+    return {
+      coins: this.#coins,
+      unlocked: [...this.#unlocked],
+      selected: this.#selected,
+      weapons: {
+        unlocked: [...this.#weaponsUnlocked],
+        levels: { ...this.#weaponLevels },
+        selected: this.#weaponsSelected,
+      },
+    };
+  }
+
+  /** Development helper: wipe everything back to a first launch. */
+  reset() {
+    this.#coins = 0;
+    this.#unlocked = new Set([DEFAULT_AIRCRAFT_ID]);
+    this.#selected = DEFAULT_AIRCRAFT_ID;
+    this.#weaponsUnlocked = new Set([DEFAULT_WEAPON_ID]);
+    this.#weaponLevels = {};
+    for (const id of WEAPON_IDS) this.#weaponLevels[id] = 0;
+    this.#weaponsSelected = DEFAULT_WEAPON_ID;
+    this.#persist();
   }
 
   #persist() {

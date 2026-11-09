@@ -1318,7 +1318,8 @@ async function main() {
         shownCoins: document.querySelector('.results [data-field="coins"]')?.textContent ?? '',
         recordShown: !document.querySelector('.results [data-role="record"]')?.hidden,
         hangarUsable: !document.querySelector('.results [data-action="hangar"]')?.disabled,
-        placeholders: ['shop', 'leaderboard'].map((action) =>
+        shopUsable: !document.querySelector('.results [data-action="shop"]')?.disabled,
+        placeholders: ['leaderboard'].map((action) =>
           Boolean(document.querySelector(`.results [data-action="${action}"]`)?.disabled),
         ),
         pauseAfter: game.pause(),
@@ -1415,7 +1416,8 @@ async function main() {
       `   record: ${ending.bestDistance} m stored as "${ending.stored}"` +
         `   panel "${ending.shownDistance}" best "${ending.shownBest}"` +
         ` new ${ending.recordShown}   placeholders disabled: ${ending.placeholders.join('/')}` +
-        `   hangar ${ending.hangarUsable ? 'open' : 'DISABLED'}`,
+        `   hangar ${ending.hangarUsable ? 'open' : 'DISABLED'}` +
+        `   shop ${ending.shopUsable ? 'open' : 'DISABLED'}`,
     );
     console.log(
       `   replay: ${replay.state} at ${replay.distance.toFixed(0)} m, ${replay.coins} coins,` +
@@ -1499,10 +1501,13 @@ async function main() {
       problems.push(`the panel showed "${ending.shownBest}" as the best`);
     }
     if (ending.placeholders.some((disabled) => !disabled)) {
-      problems.push('the shop or leaderboard placeholder looks usable');
+      problems.push('the leaderboard placeholder looks usable');
     }
     if (!ending.hangarUsable) {
       problems.push('the hangar button is still a disabled placeholder');
+    }
+    if (!ending.shopUsable) {
+      problems.push('the shop button is still a disabled placeholder');
     }
 
     if (replay.state !== 'flying') problems.push(`Fly again left the game in "${replay.state}"`);
