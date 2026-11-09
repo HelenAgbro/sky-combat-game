@@ -1,0 +1,9 @@
+{
+  "leaderboard": {
+    "stats": [
+      { "key": "distance", "label": "Distance (m)", "order": "highest" },
+      { "key": "coins", "label": "Coins", "order": "highest" },
+      { "key": "kills", "label": "Shootdowns", "order": "highest" }
+    ]
+  }
+}

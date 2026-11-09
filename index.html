@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#0a1220" />
+    <meta
+      name="description"
+      content="Sky Combat — a 3D aerial combat arcade game. Fly, fight and chase the greatest distance. Built for start.ng."
+    />
+    <title>Sky Combat</title>
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <script type="module" crossorigin src="./assets/app.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/style.css">
+  </head>
+  <body>
+    <!-- The WebGL canvas. Everything else in the interface is DOM layered above it. -->
+    <canvas id="viewport" aria-label="Sky Combat 3D view"></canvas>
+
+    <!-- Interface root. Every screen is created and owned by a module in src/ui/. -->
+    <div id="ui"></div>
+
+    <noscript>
+      <div class="screen fatal">
+        <div class="panel">
+          <h2>Sky Combat needs JavaScript</h2>
+          <p>Please enable JavaScript in your browser and reload the page.</p>
+        </div>
+      </div>
+    </noscript>
+
+  </body>
+</html>
