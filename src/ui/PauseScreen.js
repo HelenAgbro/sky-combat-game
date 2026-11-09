@@ -8,7 +8,7 @@
 export class PauseScreen {
   #element;
 
-  constructor(root, { onResume, onRestart, onMenu } = {}) {
+  constructor(root, { onResume, onRestart, onSettings, onMenu } = {}) {
     this.#element = document.createElement('div');
     this.#element.className = 'screen pause is-hidden';
     this.#element.setAttribute('role', 'dialog');
@@ -20,6 +20,7 @@ export class PauseScreen {
         <div class="pause-actions">
           <button class="btn primary" type="button" data-action="resume">Resume</button>
           <button class="btn ghost" type="button" data-action="restart">Restart</button>
+          <button class="btn ghost" type="button" data-action="settings">Settings</button>
           <button class="btn ghost" type="button" data-action="menu">Main menu</button>
         </div>
         <p class="muted pause-note">P or Escape resumes. W A S D and the arrow keys fly.</p>
@@ -28,6 +29,7 @@ export class PauseScreen {
 
     this.#element.querySelector('[data-action="resume"]').addEventListener('click', () => onResume?.());
     this.#element.querySelector('[data-action="restart"]').addEventListener('click', () => onRestart?.());
+    this.#element.querySelector('[data-action="settings"]').addEventListener('click', () => onSettings?.());
     this.#element.querySelector('[data-action="menu"]').addEventListener('click', () => onMenu?.());
 
     root.append(this.#element);

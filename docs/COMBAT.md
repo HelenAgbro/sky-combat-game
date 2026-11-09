@@ -137,8 +137,8 @@ tests that hold it in place.
 
 ## What is deliberately absent
 
-- **Missiles, bombs and special weapons.** The gun is the whole arsenal for now; payloads and
-  the shop belong with progression.
+- **Bombs and secondary payloads.** The four weapons — standard, spread, laser and homing
+  missiles — are the whole arsenal for now (see `data/weapons.js`); bombs belong later.
 - **Anything resembling real tactics.** Enemies do not coordinate, do not use terrain, do not
   form up and do not flee.
 - **Damage to individual systems.** The hull is one number.

@@ -19,6 +19,8 @@
 import { Group, Vector3 } from 'three';
 import { BOUNDS, COMBAT, RUN } from '../game/config.js';
 import { clamp, createSeededRandom } from '../game/math.js';
+import { resolveWeapon } from '../data/weapons.js';
+import { Beams } from './Beams.js';
 import { Enemies } from './Enemies.js';
 import { Impacts } from './Impacts.js';
 import { Obstacles } from './Obstacles.js';
@@ -39,6 +41,10 @@ const _origin = new Vector3();
 const _direction = new Vector3();
 const _point = new Vector3();
 const _spread = new Vector3();
+const _dir = new Vector3();
+const _fanAxis = new Vector3();
+const _laserEnd = new Vector3();
+const _worldUp = new Vector3(0, 1, 0);
 
 export class Combat {
   #group;
@@ -47,6 +53,8 @@ export class Combat {
   #playerShots;
   #enemyShots;
   #impacts;
+  #beams;
+  #weapon;
   #config;
   #random;
   #listeners = new Map();
@@ -58,6 +66,8 @@ export class Combat {
   /** 0–1: where the run is on the difficulty ramp. Reported, never used twice. */
   #level = 0;
   #hull = 0;
+  /** Armour scales incoming damage, never the size of the 0–100 integrity bar. */
+  #hullDamageScale = 1;
   #kills = 0;
   #score = 0;
   #shotsFired = 0;
@@ -67,7 +77,7 @@ export class Combat {
   #damageScale = 1;
   #tracerScale = 1;
 
-  constructor({ preset, config = COMBAT, seed = 1337 }) {
+  constructor({ preset, config = COMBAT, seed = 1337, hullDamageScale = 1 }) {
     this.#config = config;
     this.#random = createSeededRandom(seed);
 
@@ -87,6 +97,10 @@ export class Combat {
       name: 'enemy-shots',
     });
     this.#impacts = new Impacts({ capacity: preset.impacts ?? 32 });
+    this.#beams = new Beams({ capacity: 12 });
+    // The fight starts armed with the standard gun. `Game` swaps in the selected weapon
+    // at boot, but nothing here depends on that having happened yet.
+    this.#weapon = resolveWeapon('standard', 0);
 
     this.#group.add(
       this.#enemies.group,
@@ -94,9 +108,11 @@ export class Combat {
       this.#playerShots.mesh,
       this.#enemyShots.mesh,
       this.#impacts.mesh,
+      this.#beams.group,
     );
 
     this.#hull = config.hull.max;
+    this.#hullDamageScale = Number.isFinite(hullDamageScale) && hullDamageScale > 0 ? hullDamageScale : 1;
   }
 
   get group() {
@@ -140,6 +156,7 @@ export class Combat {
     this.#playerShots.releaseAll();
     this.#enemyShots.releaseAll();
     this.#impacts.releaseAll();
+    this.#beams.releaseAll();
 
     this.#spawnTimer = this.#config.enemies.firstSpawn;
     this.#cooldown = 0;
@@ -172,7 +189,23 @@ export class Combat {
     this.#specialAmmo = next;
     this.#damageScale = next ? (tuning?.specialDamageScale ?? 2.2) : 1;
     this.#tracerScale = next ? (tuning?.specialTracerScale ?? 1.7) : 1;
-    this.#playerShots.setColour(next ? '#bff0ff' : '#ffd27a');
+    this.#playerShots.setColour(next ? '#bff0ff' : (this.#weapon?.colour ?? '#ffd27a'));
+    return true;
+  }
+
+  /**
+   * Load a weapon into the player's gun.
+   *
+   * `spec` is a `resolveWeapon(id, level)` object. Setting it changes every shot fired from
+   * now on — cadence, damage, spread and behaviour — while the power-up's temporary
+   * ammunition still applies on top. Idempotent enough to be called every boot.
+   *
+   * @param {object} spec from `resolveWeapon`
+   */
+  setWeapon(spec) {
+    if (!spec || typeof spec.kind !== 'string') return false;
+    this.#weapon = spec;
+    this.#playerShots.setColour(this.#specialAmmo ? '#bff0ff' : (spec.colour ?? '#ffd27a'));
     return true;
   }
 
@@ -227,6 +260,8 @@ export class Combat {
     this.#firePlayerGun(dt, player);
     this.#fireEnemyGuns(dt, player, difficulty);
 
+    // Homing rounds steer before they move, so the turn is felt in the same step.
+    this.#steerHoming(dt);
     this.#playerShots.update(dt);
     this.#enemyShots.update(dt);
 
@@ -237,39 +272,133 @@ export class Combat {
   /** Face the impact flashes at the camera. Per frame, not per simulation step. */
   updateVisuals(dt, camera) {
     this.#impacts.update(dt, camera);
+    this.#beams.update(dt);
   }
 
-  /**
-   * The gun. Held down it fires at its own cadence, so the trigger is one control rather
-   * than a stream of button events.
-   */
+  /** The gun. Held down it fires at its own cadence. Each weapon fires its own way. */
   #firePlayerGun(dt, player) {
     this.#cooldown -= dt;
     if (!player.input?.fire || this.#cooldown > 0) return;
 
-    const gun = this.#config.gun;
-    this.#cooldown = gun.cooldown;
-    this.#shotsFired += 1;
+    const weapon = this.#weapon;
+    this.#cooldown = weapon.cooldown;
+    this.#emit('shoot', { weapon: weapon.id, kind: weapon.kind });
+    _origin.copy(player.position).addScaledVector(player.forward, MUZZLE_FORWARD);
 
-    this.#aimFrom(player, MUZZLE_FORWARD, gun.spread);
-    // The shot inherits the aircraft's own speed: flying fast makes the gun hit harder,
-    // which is both true and satisfying.
-    const shot = this.#playerShots.fire(
-      _origin,
-      _direction,
-      gun.speed + player.speed,
-      gun.lifespan,
-      this.#tracerScale,
-    );
-    if (!shot) return;
+    if (weapon.kind === 'laser') {
+      this.#shotsFired += 1;
+      this.#fireLaser(player);
+      return;
+    }
 
-    // The round keeps the power it was fired with, even if the power-up expires while it is
-    // still in the air. Ammunition is loaded at the muzzle, not at the target.
-    shot.damageScale = this.#damageScale;
+    const count = weapon.kind === 'spread' ? (weapon.count ?? 5) : 1;
+    const fan = weapon.kind === 'spread' ? (weapon.fan ?? 0.1) : 0;
+    const scatter = weapon.kind === 'spread' ? 0 : (weapon.spread ?? 0);
+    // Every pellet is a shot, so a spread burst's accuracy can never exceed 100%.
+    this.#shotsFired += count;
 
+    for (let i = 0; i < count; i += 1) {
+      const direction = this.#aimDirection(player, i, count, fan, scatter);
+      const shot = this.#playerShots.fire(
+        _origin,
+        direction,
+        (weapon.speed ?? this.#config.gun.speed) + player.speed,
+        weapon.lifespan ?? this.#config.gun.lifespan,
+        this.#tracerScale,
+      );
+      if (!shot) continue;
+      // The round keeps the power it was fired with, even if the power-up expires while it is
+      // still in the air. Ammunition is loaded at the muzzle, not at the target.
+      shot.damageScale = this.#damageScale;
+      shot.kind = weapon.kind; // 'standard' | 'spread' | 'homing'
+    }
+
+    this.#muzzleFlash(weapon);
+  }
+
+  /** Muzzle scatter plus spread-fan into one unit direction (a reused scratch). */
+  #aimDirection(player, i, count, fan, scatter) {
+    _dir.copy(player.forward).normalize();
+
+    if (count > 1 && fan > 0) {
+      // A symmetric fan across the nose: pellets at -0.5..0.5 of the fan angle.
+      const t = i / (count - 1) - 0.5;
+      _fanAxis.crossVectors(_dir, _worldUp);
+      if (_fanAxis.lengthSq() < 1e-6) _fanAxis.set(1, 0, 0);
+      _fanAxis.normalize();
+      _dir.applyAxisAngle(_fanAxis, t * fan);
+    }
+
+    if (scatter > 0) {
+      _dir.x += (this.#random() - 0.5) * scatter * 2;
+      _dir.y += (this.#random() - 0.5) * scatter * 2;
+      _dir.z += (this.#random() - 0.5) * scatter * 2;
+      _dir.normalize();
+    }
+
+    return _dir;
+  }
+
+  /** An instant beam: damage to the first enemy along the ray, and a beam drawn to it. */
+  #fireLaser(player) {
+    const weapon = this.#weapon;
+    _direction.copy(player.forward).normalize();
+    _laserEnd.copy(_origin).addScaledVector(_direction, weapon.range ?? 900);
+
+    let target = null;
+    let hitT = 1;
+    for (const enemy of this.#enemies.active) {
+      const result = sweptSphereHit(_origin, _laserEnd, enemy.position, enemy.radius);
+      if (result.hit && result.t < hitT) {
+        hitT = result.t;
+        target = enemy;
+      }
+    }
+
+    const beamEnd = target ? _point.lerpVectors(_origin, _laserEnd, hitT) : _laserEnd;
+    this.#beams.spawn(_origin, beamEnd, { life: 0.1 });
+
+    if (target) this.#hitEnemy(target, (weapon.damage ?? 26) * this.#damageScale, beamEnd);
+  }
+
+  /** Steer homing shots toward the nearest enemy within their seek range. */
+  #steerHoming(dt) {
+    if (this.#weapon.kind !== 'homing') return;
+    const shots = this.#playerShots.active;
+    if (shots.length === 0) return;
+
+    const seekRange = this.#weapon.seekRange ?? 1600;
+    const turnRate = this.#weapon.turnRate ?? 2;
+
+    for (let i = 0; i < shots.length; i += 1) {
+      const shot = shots[i];
+      if (shot.kind !== 'homing') continue;
+      const target = this.#nearestEnemyTo(shot.position, seekRange);
+      if (!target) continue;
+      _dir.subVectors(target.position, shot.position).normalize();
+      shot.direction.rotateTowards(_dir, turnRate * dt);
+    }
+  }
+
+  /** The closest active enemy within `range`, or null. */
+  #nearestEnemyTo(point, range) {
+    let best = null;
+    let bestDistance = range * range;
+    for (const enemy of this.#enemies.active) {
+      const distance = point.distanceToSquared(enemy.position);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = enemy;
+      }
+    }
+    return best;
+  }
+
+  /** The one-frame muzzle flash. Colour follows the weapon, or the loaded ammunition. */
+  #muzzleFlash(weapon) {
     this.#impacts.spawn(_origin, {
       size: this.#specialAmmo ? 3.4 : 2.2,
-      colour: this.#specialAmmo ? '#cdf4ff' : '#fff0c0',
+      colour: this.#specialAmmo ? '#cdf4ff' : (weapon.colour ?? '#fff0c0'),
       life: 0.08,
       growth: 0.5,
     });
@@ -305,18 +434,6 @@ export class Combat {
     }
   }
 
-  /** A shot leaves the nose, with a little scatter so a stream of them is a cone. */
-  #aimFrom(player, forward, spread) {
-    _origin.copy(player.position).addScaledVector(player.forward, forward);
-    _direction.copy(player.forward);
-    _spread.set(
-      (this.#random() - 0.5) * spread * 2,
-      (this.#random() - 0.5) * spread * 2,
-      (this.#random() - 0.5) * spread * 2,
-    );
-    _direction.add(_spread).normalize();
-  }
-
   /**
    * Player shots against enemies.
    *
@@ -347,7 +464,7 @@ export class Combat {
       // else: one shot, one hit.
       const from = shot.previous;
       const to = shot.position;
-      const damage = this.#config.gun.damage * (shot.damageScale ?? 1);
+      const damage = (this.#weapon.damage ?? this.#config.gun.damage) * (shot.damageScale ?? 1);
       this.#playerShots.release(shot);
       _point.lerpVectors(from, to, hitT);
       this.#hitEnemy(hitEnemy, damage, _point);
@@ -459,9 +576,10 @@ export class Combat {
     if (this.#ended || this.#grace > 0) return;
 
     this.#grace = this.#config.hull.grace;
-    this.#hull = Math.max(0, this.#hull - amount);
+    const damage = Math.max(0, amount) * this.#hullDamageScale;
+    this.#hull = Math.max(0, this.#hull - damage);
     this.#impacts.spawn(point ?? _point, { size: 5, colour: '#ff8a5a', life: 0.3, growth: 1.8 });
-    this.#emit('damage', { amount, hull: this.#hull, source });
+    this.#emit('damage', { amount: damage, base: amount, hull: this.#hull, source });
 
     if (this.#hull > 0) return;
     this.#ended = true;
@@ -489,6 +607,8 @@ export class Combat {
       impacts: this.#impacts.activeCount,
       ended: this.#ended,
       specialAmmo: this.#specialAmmo,
+      weapon: this.#weapon?.id ?? 'standard',
+      weaponLevel: this.#weapon?.level ?? 0,
     };
   }
 
@@ -514,6 +634,7 @@ export class Combat {
     this.#playerShots.dispose();
     this.#enemyShots.dispose();
     this.#impacts.dispose();
+    this.#beams.dispose();
     this.#listeners.clear();
     this.#group.clear();
   }

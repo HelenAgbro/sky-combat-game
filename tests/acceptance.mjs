@@ -1317,7 +1317,9 @@ async function main() {
         shownBest: document.querySelector('.results [data-field="best"]')?.textContent ?? '',
         shownCoins: document.querySelector('.results [data-field="coins"]')?.textContent ?? '',
         recordShown: !document.querySelector('.results [data-role="record"]')?.hidden,
-        placeholders: ['hangar', 'shop', 'leaderboard'].map((action) =>
+        hangarUsable: !document.querySelector('.results [data-action="hangar"]')?.disabled,
+        shopUsable: !document.querySelector('.results [data-action="shop"]')?.disabled,
+        placeholders: ['leaderboard'].map((action) =>
           Boolean(document.querySelector(`.results [data-action="${action}"]`)?.disabled),
         ),
         pauseAfter: game.pause(),
@@ -1413,7 +1415,9 @@ async function main() {
     console.log(
       `   record: ${ending.bestDistance} m stored as "${ending.stored}"` +
         `   panel "${ending.shownDistance}" best "${ending.shownBest}"` +
-        ` new ${ending.recordShown}   placeholders disabled: ${ending.placeholders.join('/')}`,
+        ` new ${ending.recordShown}   placeholders disabled: ${ending.placeholders.join('/')}` +
+        `   hangar ${ending.hangarUsable ? 'open' : 'DISABLED'}` +
+        `   shop ${ending.shopUsable ? 'open' : 'DISABLED'}`,
     );
     console.log(
       `   replay: ${replay.state} at ${replay.distance.toFixed(0)} m, ${replay.coins} coins,` +
@@ -1497,7 +1501,13 @@ async function main() {
       problems.push(`the panel showed "${ending.shownBest}" as the best`);
     }
     if (ending.placeholders.some((disabled) => !disabled)) {
-      problems.push('the hangar, shop or leaderboard placeholder looks usable');
+      problems.push('the leaderboard placeholder looks usable');
+    }
+    if (!ending.hangarUsable) {
+      problems.push('the hangar button is still a disabled placeholder');
+    }
+    if (!ending.shopUsable) {
+      problems.push('the shop button is still a disabled placeholder');
     }
 
     if (replay.state !== 'flying') problems.push(`Fly again left the game in "${replay.state}"`);

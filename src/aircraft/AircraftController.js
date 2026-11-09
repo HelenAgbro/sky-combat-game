@@ -37,12 +37,29 @@ const _up = new Vector3();
 const clamp01 = (value) => clamp(value, 0, 1);
 
 /** Turn 0–10 hangar ratings into multipliers. */
-export function scaleFromAttributes({ speed = 5, agility = 5, fuel = 5 } = {}) {
+export function scaleFromAttributes({ speed = 5, agility = 5, fuel = 5, armour = 5 } = {}) {
   return {
     speed: 0.86 + (speed / 10) * 0.34,
     agility: 0.8 + (agility / 10) * 0.5,
     fuel: 0.85 + (fuel / 10) * 0.5,
+    // Armour is a resistance: higher is tougher. The Falcon's 5 is exactly 1.0.
+    armour: 0.8 + (armour / 10) * 0.4,
   };
+}
+
+/**
+ * Damage taken per hit for a given armour rating.
+ *
+ * The combat hull is a 0–100 integrity readout, so armour changes how much each hit
+ * chips rather than the size of the bar. Armour 5 (the Falcon) is the 1.0 baseline;
+ * heavier aircraft take less, lighter ones more.
+ *
+ * @param {number} armour 0–10
+ * @returns {number} the incoming-damage multiplier (lower is tougher to hurt)
+ */
+export function armourDamageScale(armour = 5) {
+  const resistance = scaleFromAttributes({ armour }).armour;
+  return 1 / Math.max(0.2, resistance);
 }
 
 export class AircraftController {

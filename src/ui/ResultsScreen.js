@@ -23,7 +23,7 @@ export class ResultsScreen {
   #title;
   #record;
 
-  constructor(root, { onRestart, onMenu } = {}) {
+  constructor(root, { onRestart, onMenu, onHangar, onShop } = {}) {
     this.#element = document.createElement('div');
     this.#element.className = 'screen results is-hidden';
     this.#element.setAttribute('role', 'dialog');
@@ -38,6 +38,7 @@ export class ResultsScreen {
           <div class="result"><span>Best</span><b data-field="best">0 m</b></div>
           <div class="result"><span>Destroyed</span><b data-field="kills">0</b></div>
           <div class="result"><span>Coins</span><b data-field="coins">0</b></div>
+          <div class="result"><span>Bank</span><b data-field="bank">0</b></div>
           <div class="result"><span>Score</span><b data-field="score">0</b></div>
           <div class="result"><span>Time</span><b data-field="time">0:00</b></div>
           <div class="result"><span>Shots fired</span><b data-field="shots">0</b></div>
@@ -48,11 +49,11 @@ export class ResultsScreen {
           <button class="btn ghost" type="button" data-action="menu">Main menu</button>
         </div>
         <div class="results-actions results-actions-secondary">
-          <button class="btn ghost" type="button" data-action="hangar" disabled title="The hangar opens in stage 8">Hangar</button>
-          <button class="btn ghost" type="button" data-action="shop" disabled title="The shop opens in stage 8">Shop</button>
+          <button class="btn ghost" type="button" data-action="hangar" title="Open the hangar">Hangar</button>
+          <button class="btn ghost" type="button" data-action="shop" title="Open the weapon shop">Shop</button>
           <button class="btn ghost" type="button" data-action="leaderboard" disabled title="The start.ng leaderboard opens in stage 10">Leaderboard</button>
         </div>
-        <p class="muted results-note">Hangar, shop and the start.ng leaderboard arrive in later stages.</p>
+        <p class="muted results-note">The start.ng leaderboard arrives in stage 10.</p>
       </div>
     `;
 
@@ -61,6 +62,7 @@ export class ResultsScreen {
       best: this.#element.querySelector('[data-field="best"]'),
       kills: this.#element.querySelector('[data-field="kills"]'),
       coins: this.#element.querySelector('[data-field="coins"]'),
+      bank: this.#element.querySelector('[data-field="bank"]'),
       score: this.#element.querySelector('[data-field="score"]'),
       time: this.#element.querySelector('[data-field="time"]'),
       shots: this.#element.querySelector('[data-field="shots"]'),
@@ -72,6 +74,8 @@ export class ResultsScreen {
 
     this.#element.querySelector('[data-action="again"]').addEventListener('click', () => onRestart?.());
     this.#element.querySelector('[data-action="menu"]').addEventListener('click', () => onMenu?.());
+    this.#element.querySelector('[data-action="hangar"]').addEventListener('click', () => onHangar?.());
+    this.#element.querySelector('[data-action="shop"]').addEventListener('click', () => onShop?.());
 
     root.append(this.#element);
   }
@@ -93,6 +97,7 @@ export class ResultsScreen {
 
     this.#fields.kills.textContent = String(telemetry.kills ?? 0);
     this.#fields.coins.textContent = String(telemetry.coins ?? 0);
+    this.#fields.bank.textContent = String(telemetry.wallet ?? 0);
     this.#fields.score.textContent = String(Math.round(telemetry.score ?? 0));
 
     const seconds = Math.max(0, Math.round(telemetry.elapsed ?? 0));
